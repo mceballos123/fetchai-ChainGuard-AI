@@ -1,0 +1,29 @@
+# Core Framework
+fastapi
+uvicorn
+python-dotenv
+
+# Fetch.ai / ASI Alliance
+uagents
+cosmpy
+
+# LangGraph & LangChain for AI Orchestration
+langgraph
+langchain
+langchain-openai
+langsmith
+
+# LlamaIndex for RAG
+llama-index
+llama-index-vector-stores-pinecone
+
+# Vector Database
+pinecone-client
+
+# OpenAI
+openai
+
+# Additional useful packages
+SQLAlchemy
+sentry-sdk
+pydantic
