@@ -1,25 +1,18 @@
 from uagents import Model
-from pydantic import Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime, UTC
-from enum import Enum
-
 
 
 class ClientMessage(Model):
     """Client's business requirements for finding a supplier"""
-    client_message: str = Field(..., description="Client's message")
+
+    client_message: str
+
 
 class SupplierSearchRequest(Model):
     """Main request model for supplier search"""
-    request_id: str = Field(..., description="Unique request identifier")
-    timestamp: str = Field(default="", description="Request timestamp")
+
+    request_id: str
+    timestamp: str = ""
     client_requirements: ClientMessage
-    
-    def __init__(self, **data):
-        if 'timestamp' not in data or not data['timestamp']:
-            data['timestamp'] = datetime.now(UTC).isoformat()
-        super().__init__(**data)
 
 
 """

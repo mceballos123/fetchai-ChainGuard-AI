@@ -1,29 +1,36 @@
-# Core Framework
+
 fastapi
 uvicorn
 python-dotenv
+pydantic
 
-# Fetch.ai / ASI Alliance
+
 uagents
 cosmpy
 
-# LangGraph & LangChain for AI Orchestration
+
 langgraph
 langchain
+langchain-core
 langchain-openai
+langchain-community
 langsmith
 
-# LlamaIndex for RAG
+# ============================================================================
+# LLAMAINDEX (RAG System)
+# ============================================================================
 llama-index
+llama-index-core
+llama-index-embeddings-openai
+llama-index-llms-ollama
 llama-index-vector-stores-pinecone
 
-# Vector Database
 pinecone-client
 
-# OpenAI
-openai
 
-# Additional useful packages
-SQLAlchemy
+
 sentry-sdk
-pydantic
+requests
+
+pytest
+pytest-asyncio

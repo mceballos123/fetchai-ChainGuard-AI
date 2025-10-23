@@ -1,47 +1,38 @@
 from uagents import Model
-from pydantic import Field
-from typing import Optional, List, Dict, Any
-from datetime import datetime, UTC
-from enum import Enum
+from typing import List
+
 
 class SupplierRecommendation(Model):
     """Single supplier recommendation with scores"""
-    supplier_name: str = Field(..., description="Name of the supplier")
-    supplier_location: str = Field(..., description="Supplier's location")
-    overall_score: float = Field(..., description="Overall compatibility score 0-100", ge=0, le=100)
-    compliance_score: float = Field(..., description="Compliance score", ge=0, le=100)
-    financial_score: float = Field(..., description="Financial health score", ge=0, le=100)
-    risk_score: float = Field(..., description="Risk score (inverted for display)", ge=0, le=100)
-    why_this_supplier: str = Field(..., description="Why this supplier is recommended")
+
+    supplier_name: str
+    supplier_location: str
+    overall_score: float
+    compliance_score: float
+    financial_score: float
+    risk_score: float
+    why_this_supplier: str
+
 
 class SupplierSearchResponse(Model):
     """Final response with supplier recommendations"""
-    request_id: str = Field(..., description="Original request ID")
-    timestamp: str = Field(default="", description="Response timestamp")
-    top_supplier: Optional[SupplierRecommendation] = Field(None, description="Top recommended supplier")
-    alternative_suppliers: List[SupplierRecommendation] = Field(
-        default_factory=list, 
-        description="Alternative supplier options"
-    )
-    search_summary: str = Field(..., description="Summary of search results")
-    
-    def __init__(self, **data):
-        if 'timestamp' not in data or not data['timestamp']:
-            data['timestamp'] = datetime.now(UTC).isoformat()
-        super().__init__(**data)
+
+    request_id: str
+    timestamp: str = ""
+    top_supplier: SupplierRecommendation
+    alternative_suppliers: List[SupplierRecommendation] = []
+    search_summary: str
+
 
 class ErrorResponse(Model):
     """Error response model"""
-    request_id: str = Field(..., description="Original request ID")
-    error: str = Field(..., description="Error message")
-    error_type: str = Field(..., description="Type of error")
-    timestamp: str = Field(default="", description="Error timestamp")
-    
-    def __init__(self, **data):
-        if 'timestamp' not in data or not data['timestamp']:
-            data['timestamp'] = datetime.now(UTC).isoformat()
-        super().__init__(**data)
-    
+
+    request_id: str
+    error: str
+    error_type: str
+    timestamp: str = ""
+
+
 """
     Prompt message for the supplier recommendation agent to recommend the supplier:
     Documents --> RAG + Llama index  --> Supplier Recommendation
