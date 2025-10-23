@@ -1,7 +1,7 @@
-
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Literal
 from backend.models.compliance import ComplianceRequest, ComplianceResponse
+from backend.langgraph_logic.state_schemas import SupplierWorkflowState
 import os
 import json
 import re
@@ -20,6 +20,8 @@ from llama_index.embeddings.ollama import OllamaEmbedding
 from pinecone import Pinecone, ServerlessSpec
 from llama_index.llms.ollama import Ollama
 
+from langgraph.graph import StateGraph, START, END
+
 load_dotenv()
 
 FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_COMPLIANCE")
@@ -27,8 +29,9 @@ FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_COMPLIANCE")
 
 COMPLIANCE_FILES_DIR = Path(FILE_PATH)
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION") # matches Ollama embedding model (e.g., nomic-embed-text)
-
+EMBEDDING_DIMENSION = os.getenv(
+    "EMBEDDING_DIMENSION"
+)
 
 class ComplianceRAGSystem:
     """RAG system for compliance document retrieval and analysis using local files"""
@@ -186,9 +189,7 @@ class ComplianceRAGSystem:
                     ctx.logger.info(f"Excluding: {doc_name}")
 
             if not filtered_docs:
-                ctx.logger.warning(
-                    f" No documents found for supplier: {supplier_name}"
-                )
+                ctx.logger.warning(f" No documents found for supplier: {supplier_name}")
                 return False
 
             # Re-index with only the selected supplier
@@ -216,9 +217,7 @@ class ComplianceRAGSystem:
             existing_indexes = [idx.name for idx in pc.list_indexes()]
 
             if PINECONE_INDEX_NAME not in existing_indexes:
-                ctx.logger.info(
-                    f" Creating new Pinecone index: {PINECONE_INDEX_NAME}"
-                )
+                ctx.logger.info(f" Creating new Pinecone index: {PINECONE_INDEX_NAME}")
                 pc.create_index(
                     name=PINECONE_INDEX_NAME,
                     dimension=EMBEDDING_DIMENSION,
@@ -400,6 +399,10 @@ class ComplianceRAGSystem:
         """Parse LLM response and extract structured compliance data"""
         try:
             ctx.logger.info("Parsing compliance scores from LLM response...")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info("RAW LLM RESPONSE:")
+            ctx.logger.info(response_text)
+            ctx.logger.info("=" * 70)
 
             # Initialize defaults
             ethics_score = 50.0
@@ -419,41 +422,66 @@ class ComplianceRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         ethics_score = max(0, min(100, float(score_str)))
-                    except (ValueError, IndexError):
+                        ctx.logger.info(f"✓ Extracted ETHICS_SCORE: {ethics_score}")
+                    except (ValueError, IndexError) as e:
+                        ctx.logger.warning(
+                            f"Could not parse ethics score from: {line} - {e}"
+                        )
                         pass
 
                 elif "sustainability_score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         sustainability_score = max(0, min(100, float(score_str)))
-                    except (ValueError, IndexError):
+                        ctx.logger.info(
+                            f"Extracted SUSTAINABILITY_SCORE: {sustainability_score}"
+                        )
+                    except (ValueError, IndexError) as e:
+                        ctx.logger.warning(
+                            f"Could not parse sustainability score from: {line} - {e}"
+                        )
                         pass
 
                 elif "combined_score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         combined_score = max(0, min(100, float(score_str)))
-                    except (ValueError, IndexError):
+                        ctx.logger.info(f"✓ Extracted COMBINED_SCORE: {combined_score}")
+                    except (ValueError, IndexError) as e:
+                        ctx.logger.warning(
+                            f"Could not parse combined score from: {line} - {e}"
+                        )
                         pass
 
                 elif "ethics_info:" in line_lower:
                     ethics_info = line.split(":", 1)[-1].strip()
+                    ctx.logger.info(f"✓ Extracted ETHICS_INFO: {ethics_info[:50]}...")
 
                 elif "sustainability_info:" in line_lower:
                     sustainability_info = line.split(":", 1)[-1].strip()
+                    ctx.logger.info(
+                        f"✓ Extracted SUSTAINABILITY_INFO: {sustainability_info[:50]}..."
+                    )
 
                 elif "violations:" in line_lower:
                     violations_str = line.split(":", 1)[-1].strip().lower()
                     if violations_str != "none" and violations_str:
                         violations = [v.strip() for v in violations_str.split(",")]
+                    ctx.logger.info(f"✓ Extracted VIOLATIONS: {violations}")
 
             # If combined_score wasn't provided, calculate it
             if combined_score == 50.0:
                 combined_score = (ethics_score + sustainability_score) / 2
+                ctx.logger.info(
+                    f"ℹ️  Combined score calculated from ethics+sustainability: {combined_score}"
+                )
 
-            ctx.logger.info(
-                f"Parsed scores - Ethics: {ethics_score}, Sustainability: {sustainability_score}, Combined: {combined_score}"
-            )
+            ctx.logger.info("=" * 70)
+            ctx.logger.info(f"FINAL PARSED SCORES:")
+            ctx.logger.info(f"  Ethics: {ethics_score}/100")
+            ctx.logger.info(f"  Sustainability: {sustainability_score}/100")
+            ctx.logger.info(f"  Combined (Compliance): {combined_score}/100")
+            ctx.logger.info("=" * 70)
 
             return {
                 "compliance_score": float(combined_score),
@@ -466,6 +494,9 @@ class ComplianceRAGSystem:
 
         except Exception as e:
             ctx.logger.error(f"Error parsing RAG response: {e}")
+            import traceback
+
+            traceback.print_exc()
             return self._generate_fallback_response(supplier_name)
 
     def _generate_fallback_response(self, supplier_name: str) -> Dict[str, Any]:
@@ -477,3 +508,264 @@ class ComplianceRAGSystem:
             "violations": ["Data retrieval unavailable"],
             "retrieved_context": "Fallback mode - RAG system unavailable",
         }
+
+    def query_compliance_documents_sync(
+        self,
+        supplier_name: str,
+        company_values: str,
+        industry: str,
+    ) -> Dict[str, Any]:
+        """
+        Synchronous wrapper for query_compliance_documents for use in LangGraph nodes.
+
+        This method should only be called from synchronous contexts.
+        For async contexts, use query_compliance_documents() instead.
+        """
+        import asyncio
+
+        # Create a mock context for sync execution
+        class MockContext:
+            def __init__(self):
+                self.logs = []
+
+            def logger_info(self, msg):
+                self.logs.append(msg)
+
+            class Logger:
+                def __init__(self, parent):
+                    self.parent = parent
+
+                def info(self, msg):
+                    pass
+
+                def error(self, msg):
+                    pass
+
+                def warning(self, msg):
+                    pass
+
+            @property
+            def logger(self):
+                return self.Logger(self)
+
+        try:
+            mock_ctx = MockContext()
+            # Use asyncio.run() to create a new event loop properly
+            # This handles the case where an event loop is already running
+            try:
+                # Try to get current running loop (will raise if no loop)
+                loop = asyncio.get_running_loop()
+                # If we're here, a loop is running, we need to use a different approach
+                # Create a new thread with its own event loop
+                import concurrent.futures
+                import threading
+
+                def run_async():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(
+                            self.query_compliance_documents(
+                                ctx=mock_ctx,
+                                supplier_name=supplier_name,
+                                company_values=company_values,
+                                industry=industry,
+                            )
+                        )
+                    finally:
+                        new_loop.close()
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(run_async)
+                    result = future.result(timeout=300)  # 5 minute timeout
+                    return result
+            except RuntimeError:
+                # No event loop running, use asyncio.run()
+                result = asyncio.run(
+                    self.query_compliance_documents(
+                        ctx=mock_ctx,
+                        supplier_name=supplier_name,
+                        company_values=company_values,
+                        industry=industry,
+                    )
+                )
+                return result
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            return self._generate_fallback_response(supplier_name)
+
+
+def compliance_check_node(
+    state: SupplierWorkflowState, rag_system: ComplianceRAGSystem, ctx: Context
+) -> SupplierWorkflowState:
+    """
+    Node 1: Run compliance check on supplier using RAG system.
+
+    Input: supplier_name, company_values, industry
+    Output: compliance_score, ethics_info, sustainability_info, violations
+    """
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("🔍 COMPLIANCE CHECK NODE")
+    ctx.logger.info("=" * 70)
+
+    try:
+        ctx.logger.info(
+            f"Checking compliance for: {state.get('supplier_name', 'Unknown')}"
+        )
+
+        # Run RAG query for compliance
+        rag_result = rag_system.query_compliance_documents_sync(
+            supplier_name=state.get("supplier_name", ""),
+            company_values=state.get("company_values", ""),
+            industry=state.get("industry", ""),
+        )
+
+        # Update state with compliance results
+        state["compliance_score"] = rag_result.get("compliance_score", 0.0)
+        state["ethics_info"] = rag_result.get("ethics_info", "N/A")
+        state["sustainability_info"] = rag_result.get("sustainability_info", "N/A")
+        state["violations"] = rag_result.get("violations", [])
+        state["rag_context"] = rag_result.get("retrieved_context", "")
+        state["current_step"] = "compliance_check_complete"
+
+        ctx.logger.info(f"✓ Compliance Score: {state['compliance_score']}/100")
+        ctx.logger.info(f"✓ Violations: {len(state['violations'])}")
+
+        return state
+
+    except Exception as e:
+        ctx.logger.error(f"❌ Error in compliance check: {e}")
+        state["current_step"] = "compliance_check_failed"
+        state["error_message"] = f"Compliance check failed: {str(e)}"
+        state["compliance_score"] = 0.0
+        return state
+
+
+def compliance_router(
+    state: SupplierWorkflowState,
+) -> Literal["success_node", "error_node"]:
+    """
+    Node 2: Conditional routing based on compliance score.
+
+    Routes to:
+    - "success_node" if score >= 75 (APPROVED)
+    - "error_node" if score < 75 OR error occurred (REJECTED)
+    """
+    compliance_score = state.get("compliance_score", 0.0)
+    error_message = state.get("error_message")
+
+    # Check for errors first
+    if error_message:
+        return "error_node"
+
+    # Check compliance threshold
+    if compliance_score >= 75:
+        return "success_node"
+    else:
+        state["error_message"] = (
+            f"Compliance score {compliance_score}/100 below threshold (75). Supplier rejected."
+        )
+        return "error_node"
+
+
+def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
+    """
+    Node 3a: Success path - Supplier meets compliance requirements.
+
+    Prepares data to send to orchestrator agent.
+    """
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("✅ SUCCESS NODE - COMPLIANCE APPROVED")
+    ctx.logger.info("=" * 70)
+
+    state["current_step"] = "compliance_approved"
+    state["should_continue"] = False
+
+    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
+    ctx.logger.info(f"Score: {state['compliance_score']}/100")
+    ctx.logger.info(f"Status: APPROVED - Ready to send to orchestrator")
+    ctx.logger.info("=" * 70)
+
+    return state
+
+
+def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
+    """
+    Node 3b: Error path - Supplier does not meet requirements.
+
+    Prepares error response.
+    """
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("❌ ERROR NODE - COMPLIANCE REJECTED")
+    ctx.logger.info("=" * 70)
+
+    compliance_score = state.get("compliance_score", 0.0)
+    error_msg = state.get("error_message", "Unknown error")
+
+    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
+    ctx.logger.info(f"Score: {compliance_score}/100")
+    ctx.logger.info(f"Error: {error_msg}")
+    ctx.logger.info("=" * 70)
+
+    state["current_step"] = "compliance_rejected"
+    state["should_continue"] = False
+
+    return state
+
+
+# ============================================================================
+# BUILD LANGGRAPH WORKFLOW
+# ============================================================================
+
+
+def build_compliance_workflow(
+    rag_system: ComplianceRAGSystem, ctx: Context
+) -> StateGraph:
+    """
+    Build the LangGraph compliance workflow.
+
+    Flow:
+    START
+        ↓
+    compliance_check_node (Run RAG analysis)
+        ↓
+    compliance_router (Check score >= 75)
+        ├─→ success_node (Score >= 75) → END
+        └─→ error_node (Score < 75 or error) → END
+
+    Returns:
+        Compiled StateGraph workflow
+    """
+    ctx.logger.info("🏗️ Building Compliance LangGraph Workflow...")
+
+    # Create state graph
+    workflow = StateGraph(SupplierWorkflowState)
+
+    # Add nodes
+    workflow.add_node(
+        "compliance_check", lambda state: compliance_check_node(state, rag_system, ctx)
+    )
+    workflow.add_node("success_node", lambda state: success_node(state, ctx))
+    workflow.add_node("error_node", lambda state: error_node(state, ctx))
+
+    # Add edges
+    workflow.add_edge(START, "compliance_check")
+    workflow.add_conditional_edges(
+        "compliance_check",
+        compliance_router,
+        {
+            "success_node": "success_node",
+            "error_node": "error_node",
+        },
+    )
+    workflow.add_edge("success_node", END)
+    workflow.add_edge("error_node", END)
+
+    # Compile workflow
+    compiled_workflow = workflow.compile()
+
+    ctx.logger.info("✓ Compliance workflow built successfully!")
+
+    return compiled_workflow
