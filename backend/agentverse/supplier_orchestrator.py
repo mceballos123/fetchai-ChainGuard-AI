@@ -17,6 +17,13 @@ from uagents_core.contrib.protocols.chat import (
 # Import compliance models
 from backend.models.compliance import ComplianceRequest, ComplianceResponse
 
+# Import test utilities
+from backend.test_func import (
+    verify_orchestrator_connection,
+    log_message_transmission,
+    validate_request_before_sending,
+)
+
 load_dotenv()
 
 SUPPLIER_ORCHESTRATOR_SEED = os.getenv("SUPPLIER_ORCHESTRATOR_SEED")
@@ -59,18 +66,26 @@ async def startup(ctx: Context):
         },
     )
 
+    # Verify connection on startup
+    conn_status = verify_orchestrator_connection(ctx)
+    ctx.logger.info(f"Connection Status: {conn_status['status']}")
+
 
 @supplier_orchestrator.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
     ctx.logger.info("Supplier Orchestrator Agent Shutting Down")
 
+
 @chat_proto.on_message(ChatMessage)
 async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
     """Handle chat messages from user via ASI:1"""
 
     # Step 0: Verify and log message received from ASI:1
-    
+    log_message_transmission(
+        ctx, "RECEIVED", "ChatMessage", str(msg.msg_id), {"sender": sender}
+    )
+
     # Step 1: Send acknowledgment immediately
     ctx.logger.info("Sending acknowledgment...")
     ack = ChatAcknowledgement(
@@ -101,6 +116,9 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             ],
         )
         await ctx.send(sender, error_response)
+        log_message_transmission(
+            ctx, "SENT", "ChatMessage", str(error_response.msg_id), {"type": "error"}
+        )
         return
 
     ctx.logger.info(f"User Query: {user_query}")
@@ -124,8 +142,25 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             timestamp="",
         )
 
+        # Validate request before sending
+        is_valid, error_msg = validate_request_before_sending(ctx, compliance_request)
+        if not is_valid:
+            raise ValueError(f"Request validation failed: {error_msg}")
+
         await ctx.send(COMPLIANCE_AGENT_ADDRESS, compliance_request)
-        
+
+        # Log transmission
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "ComplianceRequest",
+            msg_id,
+            {
+                "supplier_name": compliance_request.supplier_name,
+                "industry": compliance_request.industry,
+            },
+        )
+
         ctx.logger.info(f"ComplianceRequest sent to Compliance Agent")
 
     except Exception as e:
@@ -143,6 +178,9 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             ],
         )
         await ctx.send(sender, error_response)
+        log_message_transmission(
+            ctx, "SENT", "ChatMessage", str(error_response.msg_id), {"type": "error"}
+        )
 
 
 @chat_proto.on_message(ChatAcknowledgement)
@@ -166,7 +204,16 @@ async def handle_compliance_response(
     ctx.logger.info("=" * 60)
 
     # Verify message received from Compliance Agent
-   
+    log_message_transmission(
+        ctx,
+        "RECEIVED",
+        "ComplianceResponse",
+        msg.request_id,
+        {
+            "supplier_name": msg.supplier_name,
+            "compliance_score": msg.compliance_score,
+        },
+    )
 
     try:
         # Retrieve session information
@@ -174,9 +221,7 @@ async def handle_compliance_response(
         user_sender = active_sessions.get(msg.request_id, {}).get("sender")
 
         if not user_sender:
-            ctx.logger.warning(
-                f"Could not find session for request {msg.request_id}"
-            )
+            ctx.logger.warning(f"Could not find session for request {msg.request_id}")
             return
 
         ctx.logger.info(f"Found session for request {msg.request_id}")
@@ -219,7 +264,15 @@ Violations Found: {len(msg.violations)}
         )
 
         await ctx.send(user_sender, response)
-        
+
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "ChatMessage",
+            str(response.msg_id),
+            {"type": "compliance_result"},
+        )
+
         ctx.logger.info(f"✓ Response sent to user")
 
         # Step 3: Clean up session
@@ -233,11 +286,13 @@ Violations Found: {len(msg.violations)}
 
         traceback.print_exc()
 
+
 @chat_proto.on_message(ChatAcknowledgement)
 async def handle_acknowledgement(ctx: Context, sender: str, msg: ChatAcknowledgement):
     ctx.logger.info(
         f"Received acknowledgement from {sender} for message: {msg.acknowledged_msg_id}"
     )
+
 
 supplier_orchestrator.include(chat_proto, publish_manifest=True)
 supplier_orchestrator.include(compliance_protocol, publish_manifest=True)

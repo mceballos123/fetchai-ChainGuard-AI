@@ -14,6 +14,14 @@ from backend.langgraph_logic.compliance_langgraph import (
 )
 from backend.langgraph_logic.state_schemas import SupplierWorkflowState
 
+# Import test utilities
+from backend.test_func import (
+    verify_compliance_connection,
+    log_request_reception,
+    log_response_transmission,
+    validate_response_before_sending,
+)
+
 load_dotenv()
 
 compliance_agent = Agent(
@@ -68,6 +76,10 @@ async def startup(ctx: Context):
 
     ctx.logger.info(" Listening for ComplianceRequest messages...")
 
+    # Verify connection on startup
+    conn_status = verify_compliance_connection(ctx)
+    ctx.logger.info(f"Connection Status: {conn_status['status']}")
+
 
 # checks if the agent is shutting down and cleans up the rag system
 @compliance_agent.on_event("shutdown")
@@ -118,6 +130,9 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
     ctx.logger.info(f"   Industry: {msg.industry}")
     ctx.logger.info(f"   Company values: {msg.company_values}")
 
+    # Log request reception
+    log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
+
     # === STATE MANAGEMENT: Move current to previous ===
     previous_supplier = ctx.storage.get("current_supplier")
     if previous_supplier:
@@ -159,7 +174,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
             "product_needed": "",
             "business_type": "",
             "user_input": msg.company_values,
-            "compliance_score": None, 
+            "compliance_score": None,
             "ethics_info": None,
             "sustainability_info": None,
             "violations": [],
@@ -167,7 +182,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
             "supplier_country": None,
             "retrieved_documents": None,
             "rag_context": None,
-            "financial_score": None, # leave this None as a placeholder for now along with the risk info
+            "financial_score": None,
             "financial_info": None,
             "risk_score": None,
             "risk_info": None,
@@ -217,6 +232,11 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
             timestamp="",
         )
 
+        # Validate response before sending
+        is_valid, error_msg = validate_response_before_sending(ctx, response)
+        if not is_valid:
+            ctx.logger.warning(f"Response validation failed: {error_msg}")
+
         ctx.logger.info(f" Compliance analysis complete!")
         ctx.logger.info(f"Score: {response.compliance_score}/100")
         ctx.logger.info(f"Violations: {len(response.violations)}")
@@ -236,6 +256,15 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         supplier_history.append(current_supplier_info)
         ctx.storage.set("supplier_history", supplier_history)
         ctx.logger.info(f" Added to history (total: {len(supplier_history)} suppliers)")
+
+        # Log response transmission
+        log_response_transmission(
+            ctx,
+            msg.request_id,
+            msg.supplier_name,
+            response.compliance_score,
+            sender,
+        )
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)

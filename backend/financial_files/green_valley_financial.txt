@@ -1,0 +1,99 @@
+Supplier Financial Profile: Green Valley Coffee Co.
+Location: Costa Rica
+Year: 2024
+
+=== FINANCIAL METRICS ===
+Annual Revenue: $2.8M USD
+Operating Margin: 18%
+Cash Flow Status: Positive
+Debt-to-Equity Ratio: 0.35
+Credit Rating: A (Strong)
+
+=== TARIFF & TRADE INFORMATION ===
+Primary Market: United States
+US Import Tariff Rate (Coffee): 0% (zero tariff on unroasted coffee beans)
+EU Import Tariff Rate: 0% (free trade agreement with Central America)
+Country of Origin: Costa Rica
+Trade Agreements: 
+  • Central America-United States Free Trade Agreement (CAFTA)
+  • EU trade preferential access
+  • Fair Trade certified channels (reduced tariffs on select markets)
+
+Applied Recent Tariffs:
+  • General tariff assessment: Minimal (0-2%)
+  • Logistics/transportation surcharge: $0.45/lb (COVID-19 related, declining)
+  • Organic certification premium tariff: $0.15/lb (market advantage)
+
+=== INFLATION RATE DATA ===
+Costa Rica National Inflation Rate (2024): 4.2%
+Year-over-Year Price Change (Coffee): +3.8%
+Currency (CRC) vs USD Exchange Rate: 1 USD = 520-530 CRC
+Currency Stability: Moderate (±2% volatility)
+Projected Inflation (2025): 3.5%
+
+=== COMMODITY PRICE FLUCTUATION ===
+Current Coffee Price Index: 185 (ICE Futures)
+12-Month Range: 165-195 USD/50lb bag
+Volatility Factor: Medium
+Price Trend: Stable with seasonal variations
+
+=== FINANCIAL RISK ASSESSMENT ===
+Overall Risk Score: 22/100 (LOW RISK)
+Risk Categories:
+  • Currency Risk: Low (diversified USD sales)
+  • Credit Risk: Very Low (strong payment history)
+  • Commodity Risk: Medium (subject to global coffee prices)
+  • Geopolitical Risk: Low (Central America stable)
+  • Supply Chain Risk: Low (established relationships, no recent disruptions)
+  • Inflation Impact: Low-Moderate (hedged through pricing strategy)
+
+=== OPERATIONAL COSTS ===
+Average Monthly Operating Costs: $180K USD
+Labor Costs (% of revenue): 22%
+Transportation Costs: $55K/month average
+Packaging & Processing: $28K/month
+Facilities & Utilities: $18K/month
+
+=== FINANCIAL PROJECTIONS ===
+Q1 2025 Projected Revenue: $650K
+Q1 2025 Projected Net Income: $117K
+Expected Growth Rate: 8% YoY
+Planned Capital Investments: $250K (facility upgrades, solar expansion)
+
+=== FINANCING STATUS ===
+Current Debt Outstanding: $280K
+Debt Maturity: 3 years remaining
+Interest Rate: 4.8%
+Available Credit Line: $500K
+Utilization: 35%
+
+=== PAYMENT TERMS & CONDITIONS ===
+Standard Payment Terms: Net 30-45 days
+Early Payment Discount: 2% for payment within 10 days
+Payment Methods: Wire transfer, ACH, Trade credit
+Average Days Sales Outstanding (DSO): 35 days
+Payment Default History: 0 incidents in past 3 years
+
+=== SUSTAINABILITY INVESTMENT ===
+Annual Investment in Sustainability: $180K
+ROI on Sustainability Projects: 12%
+Impact:
+  • Reduced operational costs through efficiency
+  • Premium pricing (5-8% higher) for certified products
+  • Improved brand reputation and market access
+
+=== MARKET POSITION ===
+Market Share (Costa Rican Coffee): 8%
+Customer Base: 45+ international importers
+Concentration Risk: Top 3 customers = 28% of revenue
+Customer Retention Rate: 92%
+
+=== RECOMMENDATIONS ===
+✓ APPROVED FOR PARTNERSHIP
+Rationale: Strong financial position with low commodity and currency risk. Stable
+operations, excellent payment history, and strategic investments in sustainability
+create a low-risk profile. Recommend standard terms with consideration for volume
+discounts given their scale and reliability.
+
+Last Updated: October 2024
+Prepared by: Financial Analysis Unit
