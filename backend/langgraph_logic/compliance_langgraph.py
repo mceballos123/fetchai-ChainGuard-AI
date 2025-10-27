@@ -27,11 +27,47 @@ load_dotenv()
 FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_COMPLIANCE")
 
 
-COMPLIANCE_FILES_DIR = Path(FILE_PATH)
+def _resolve_compliance_path() -> Path:
+    """
+    Resolve the compliance files path with fallback options.
+    Ensures consistency across different environments and startups.
+
+    Priority:
+    1. Environment variable FILE_PATH_DOCUMENTS_COMPLIANCE
+    2. Relative path from backend directory
+    3. Absolute path from current working directory
+    """
+    # Option 1: Use environment variable if set
+    if FILE_PATH and FILE_PATH != "None":
+        resolved = Path(FILE_PATH)
+        if resolved.exists():
+            print(f"✓ Using ENV path: {resolved}")
+            return resolved
+
+    # Option 2: Try relative path from backend directory
+    relative_path = Path(__file__).parent.parent / "compliance_files"
+    if relative_path.exists():
+        print(f"✓ Using relative path: {relative_path}")
+        return relative_path
+
+    # Option 3: Try from current working directory
+    cwd_path = Path.cwd() / "backend" / "compliance_files"
+    if cwd_path.exists():
+        print(f"✓ Using CWD path: {cwd_path}")
+        return cwd_path
+
+    # Fallback: Return the most likely path (will error appropriately in _load_compliance_files)
+    print(f"⚠ No compliance files found in any expected location")
+    print(f"  Checked: {FILE_PATH}, {relative_path}, {cwd_path}")
+    return relative_path
+
+
+COMPLIANCE_FILES_DIR = _resolve_compliance_path()
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-EMBEDDING_DIMENSION = os.getenv(
-    "EMBEDDING_DIMENSION"
-)
+EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
+print(f"Resolved compliance path: {COMPLIANCE_FILES_DIR}")
+print(f"Path exists: {COMPLIANCE_FILES_DIR.exists()}")
+
 
 class ComplianceRAGSystem:
     """RAG system for compliance document retrieval and analysis using local files"""
@@ -86,30 +122,55 @@ class ComplianceRAGSystem:
             return False
 
     async def _load_compliance_files(self, ctx: Context) -> bool:
-        """Load compliance files from directory"""
+        """Load compliance files from directory with validation"""
         try:
+            # Validate path exists
             if not COMPLIANCE_FILES_DIR.exists():
                 ctx.logger.error(
                     f" Compliance files directory not found: {COMPLIANCE_FILES_DIR}"
                 )
+                ctx.logger.error(f" Current working directory: {Path.cwd()}")
+                ctx.logger.error(
+                    f" Expected 5 compliance files in: {COMPLIANCE_FILES_DIR}"
+                )
                 return False
+
+            # List files before loading
+            files_in_dir = list(COMPLIANCE_FILES_DIR.glob("*.txt"))
+            ctx.logger.info(f" Files found in directory: {len(files_in_dir)}")
+            for f in files_in_dir:
+                ctx.logger.info(f"   - {f.name}")
 
             # Use LlamaIndex to load documents
             reader = SimpleDirectoryReader(str(COMPLIANCE_FILES_DIR))
             self.documents = reader.load_data()
 
+            # Validation checks
             if not self.documents:
                 ctx.logger.error(" No documents found in compliance_files folder")
                 return False
 
-            ctx.logger.info(f"Loaded {len(self.documents)} compliance documents")
-            for doc in self.documents:
-                ctx.logger.info(f"   - {doc.metadata.get('file_name', 'Unknown')}")
+            # Ensure we have all 5 expected documents
+            expected_count = 5
+            if len(self.documents) < expected_count:
+                ctx.logger.warning(
+                    f" Only loaded {len(self.documents)} documents, expected {expected_count}"
+                )
+
+            ctx.logger.info(
+                f"✓ Successfully loaded {len(self.documents)} compliance documents"
+            )
+            for i, doc in enumerate(self.documents, 1):
+                file_name = doc.metadata.get("file_name", "Unknown")
+                ctx.logger.info(f"   {i}. {file_name}")
 
             return True
 
         except Exception as e:
             ctx.logger.error(f"Error loading compliance files: {e}")
+            import traceback
+
+            traceback.print_exc()
             return False
 
     async def select_best_supplier(
@@ -127,46 +188,73 @@ class ComplianceRAGSystem:
         try:
             ctx.logger.info("Selecting best supplier match...")
             ctx.logger.info(f" Available suppliers: {len(self.documents)}")
+
+            # Create a mapping of file names to help with matching
+            supplier_files = {}
             for doc in self.documents:
-                supplier_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"     - {supplier_name}")
+                file_name = doc.metadata.get("file_name", "Unknown")
+                normalized = file_name.lower().replace(".txt", "")
+                supplier_files[normalized] = file_name
+                ctx.logger.info(f"   - {file_name}")
 
             # Build selection query for LLM
             supplier_list = "\n".join(
                 [
-                    f"- {doc.metadata.get('file_name', 'Unknown')}"
+                    f"- {doc.metadata.get('file_name', 'Unknown').replace('.txt', '')}"
                     for doc in self.documents
                 ]
             )
 
             selection_query = f"""
-            Based on the provided supplier documents, select the ONE supplier 
-            that BEST aligns with these company values: {company_values}
+            OBJECTIVE SUPPLIER SELECTION - Choose the BEST match, not just any match.
+            
+            Given the company values: {company_values}
             Industry: {industry}
+            
+            Evaluate each supplier CRITICALLY:
+            - Does the supplier's practices actually align with stated company values?
+            - What are the verified certifications vs claims?
+            - Are there documented concerns or gaps?
+            - Which supplier is the STRONGEST match overall?
             
             Available suppliers:
             {supplier_list}
             
-            Respond with ONLY the supplier name (file name without .txt) that best matches.
-            Example response: "Horizon Coffee Collective" or "Sunrise Sustainable Imports"
+            Select the ONE supplier that BEST MEETS the company values based on:
+            1. Verified documentation and certifications
+            2. Actual alignment with stated values
+            3. Documented practices, not just claims
+            
+            Choose from this exact list:
+            {supplier_list}
+            
+            Respond with ONLY the exact supplier name from the list, nothing else.
             """
 
             ctx.logger.info("Using LLM to select best supplier...")
             response = self.query_engine.query(selection_query)
-            selected_supplier = str(response).strip().lower()
+            selected_supplier = str(response).strip()
 
-            ctx.logger.info(f"Selected supplier: {selected_supplier}")
+            ctx.logger.info(f"✓ LLM selected: '{selected_supplier}'")
+
+            # Normalize the response for better matching
+            normalized_response = selected_supplier.lower().replace("_", " ").strip()
+            ctx.logger.info(f"  Normalized to: '{normalized_response}'")
 
             return selected_supplier
 
         except Exception as e:
             ctx.logger.error(f"Error selecting supplier: {e}")
+            import traceback
+
+            traceback.print_exc()
+
             # Fallback: return first supplier
             if self.documents:
                 fallback = (
                     self.documents[0].metadata.get("file_name", "Unknown").lower()
                 )
-                ctx.logger.warning(f"Using fallback supplier: {fallback}")
+                ctx.logger.warning(f"✗ Using fallback supplier: {fallback}")
                 return fallback
             return None
 
@@ -174,32 +262,74 @@ class ComplianceRAGSystem:
         """
         Filter documents to include only the selected supplier.
         This ensures RAG only retrieves data about the chosen supplier.
+        Handles name matching between LLM output and file names.
         """
         try:
             ctx.logger.info(f"Filtering documents to supplier: {supplier_name}")
+            ctx.logger.info(f"Available files:")
 
-            # Find and keep only the selected supplier document
+            # Log all available documents with their names
+            for doc in self.documents:
+                doc_name = doc.metadata.get("file_name", "Unknown")
+                ctx.logger.info(f"   - File: {doc_name}")
+
+            # Normalize supplier name for matching
+            normalized_supplier = supplier_name.lower().replace("_", " ").strip()
+            ctx.logger.info(f"Normalized search term: '{normalized_supplier}'")
+
+            # Find matching document using multiple strategies
             filtered_docs = []
             for doc in self.documents:
-                doc_name = doc.metadata.get("file_name", "").lower()
-                if supplier_name.lower() in doc_name.lower():
+                doc_file_name = (
+                    doc.metadata.get("file_name", "").lower().replace(".txt", "")
+                )
+
+                # Strategy 1: Exact match on file name
+                if normalized_supplier == doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"Including: {doc_name}")
+                    ctx.logger.info(f"✓ MATCHED (exact): {doc_file_name}")
+
+                # Strategy 2: Partial match (supplier name contains or is contained in file name)
+                elif normalized_supplier in doc_file_name.replace("_", " "):
+                    filtered_docs.append(doc)
+                    ctx.logger.info(f"✓ MATCHED (partial): {doc_file_name}")
+
+                elif doc_file_name.replace("_", " ") in normalized_supplier:
+                    filtered_docs.append(doc)
+                    ctx.logger.info(f"✓ MATCHED (file in supplier): {doc_file_name}")
+
+                # Strategy 3: Key word matching
+                elif any(word in doc_file_name for word in normalized_supplier.split()):
+                    filtered_docs.append(doc)
+                    ctx.logger.info(f"✓ MATCHED (keyword): {doc_file_name}")
                 else:
-                    ctx.logger.info(f"Excluding: {doc_name}")
+                    ctx.logger.info(f"✗ EXCLUDED: {doc_file_name}")
 
             if not filtered_docs:
-                ctx.logger.warning(f" No documents found for supplier: {supplier_name}")
+                ctx.logger.error(
+                    f"✗ No documents found for supplier: '{supplier_name}'"
+                )
+                ctx.logger.error(f"  Searched for: '{normalized_supplier}'")
+                ctx.logger.error(f"  Available files:")
+                for doc in self.documents:
+                    ctx.logger.error(
+                        f"    - {doc.metadata.get('file_name', 'Unknown')}"
+                    )
                 return False
 
             # Re-index with only the selected supplier
             self.documents = filtered_docs
-
-            ctx.logger.info(f" Now analyzing only: {supplier_name}")
+            ctx.logger.info(
+                f"✓ Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
+            )
+            ctx.logger.info(f"  Now analyzing only: {supplier_name}")
             return True
 
         except Exception as e:
             ctx.logger.error(f"Error filtering documents: {e}")
+            import traceback
+
+            traceback.print_exc()
             return False
 
     async def _setup_pinecone(self, ctx: Context) -> bool:
@@ -346,25 +476,53 @@ class ComplianceRAGSystem:
 
             # Build compliance analysis query
             compliance_query = f"""
+            OBJECTIVE COMPLIANCE ANALYSIS - Be Critical and Fair
+            
             Analyze the compliance, ethics, and sustainability of supplier: {selected_supplier}
             Industry: {industry}
             Company values to align with: {company_values}
             
-            Based on the provided documents about this supplier, provide:
-            1. Ethics score (0-100) - worker treatment, labor practices, fair wages, gender equity
-            2. Sustainability score (0-100) - environmental impact, green practices, carbon footprint
-            3. Combined compliance score (average of ethics + sustainability)
-            4. Summary of ethical practices (2-3 sentences)
-            5. Summary of sustainability practices (2-3 sentences)
-            6. List any violations or concerns found (or empty list if none)
+            SCORING GUIDELINES (Be Strict):
+            - Scores should reflect ACTUAL documented evidence, not potential
+            - Deduct points for any missing certifications or unverified claims
+            - Average score (50-65) indicates "acceptable but with concerns"
+            - High scores (75+) require strong, verified evidence across ALL areas
+            - Only award 90+ for exceptional, well-documented practices
+            - Deduct for any gaps, limitations, or lack of documentation
             
-            Format your response as follows:
-            ETHICS_SCORE: [number]
-            SUSTAINABILITY_SCORE: [number]
-            COMBINED_SCORE: [number]
-            ETHICS_INFO: [text]
-            SUSTAINABILITY_INFO: [text]
-            VIOLATIONS: [comma-separated list or "none"]
+            ETHICS EVALUATION (0-100):
+            - 75-100: Verified fair wages (above living wage), comprehensive worker benefits, union support, documented gender equity
+            - 60-74: Decent wages and some benefits, limited verification of practices
+            - 40-59: Basic compliance, insufficient evidence of best practices, mixed or undocumented claims
+            - Below 40: Poor wages, worker concerns, lack of transparency, or unverified claims
+            
+            SUSTAINABILITY EVALUATION (0-100):
+            - 75-100: Verified carbon-negative/neutral, certified organic, proven reforestation, third-party audited
+            - 60-74: Good practices documented, some certifications, limited third-party verification
+            - 40-59: Claims of sustainability but minimal verification, basic practices only
+            - Below 40: Limited sustainability focus, unverified claims, or active environmental concerns
+            
+            Based on the provided documents about this supplier, provide:
+            1. Ethics score (0-100) - based on VERIFIED worker treatment, documented labor practices, actual wage data
+            2. Sustainability score (0-100) - based on VERIFIED environmental practices and third-party evidence
+            3. Combined compliance score (average of ethics + sustainability scores)
+            4. Critical summary of ethical practices (2-3 sentences, note any gaps or unverified claims)
+            5. Critical summary of sustainability practices (2-3 sentences, note certifications or lack thereof)
+            6. List specific violations, concerns, or gaps found (or "none verified" if truly none)
+            
+            IMPORTANT NOTES:
+            - Missing documentation counts as a gap
+            - Unverified claims should lower scores
+            - Look for conflicts between claims and evidence
+            - Be specific about what IS and ISN'T documented
+            
+            Format your response exactly as follows:
+            ETHICS_SCORE: [number between 0-100, be critical]
+            SUSTAINABILITY_SCORE: [number between 0-100, be critical]
+            COMBINED_SCORE: [number between 0-100]
+            ETHICS_INFO: [critical assessment with gaps noted]
+            SUSTAINABILITY_INFO: [critical assessment with gaps noted]
+            VIOLATIONS: [specific concerns, gaps, or "none verified"]
             """
 
             ctx.logger.info(f"Analyzing {selected_supplier} (LLM: {self.llm_type})")
@@ -415,7 +573,7 @@ class ComplianceRAGSystem:
             # Parse response (handle various formats)
             lines = response_text.split("\n")
 
-            for line in lines:
+            for i, line in enumerate(lines):
                 line_lower = line.lower()
 
                 if "ethics_score:" in line_lower:
@@ -454,20 +612,101 @@ class ComplianceRAGSystem:
                         pass
 
                 elif "ethics_info:" in line_lower:
-                    ethics_info = line.split(":", 1)[-1].strip()
-                    ctx.logger.info(f"✓ Extracted ETHICS_INFO: {ethics_info[:50]}...")
+                    # Extract content after "ethics_info:"
+                    content = line.split(":", 1)[-1].strip()
+
+                    # If this line is empty or minimal, try to get content from next lines
+                    if not content or len(content) < 20:
+                        # Look ahead for more content
+                        for next_line in lines[i + 1 :]:
+                            next_line_lower = next_line.lower()
+                            # Stop if we hit another field marker
+                            if ":" in next_line and any(
+                                field in next_line_lower
+                                for field in [
+                                    "sustainability",
+                                    "violations",
+                                    "combined",
+                                    "score",
+                                ]
+                            ):
+                                break
+                            if next_line.strip():
+                                content += " " + next_line.strip()
+                            else:
+                                break
+
+                    if content:
+                        ethics_info = content
+                        ctx.logger.info(
+                            f"✓ Extracted ETHICS_INFO: {ethics_info[:60]}..."
+                        )
 
                 elif "sustainability_info:" in line_lower:
-                    sustainability_info = line.split(":", 1)[-1].strip()
-                    ctx.logger.info(
-                        f"✓ Extracted SUSTAINABILITY_INFO: {sustainability_info[:50]}..."
-                    )
+                    # Extract content after "sustainability_info:"
+                    content = line.split(":", 1)[-1].strip()
+
+                    # If this line is empty or minimal, try to get content from next lines
+                    if not content or len(content) < 20:
+                        # Look ahead for more content
+                        for next_line in lines[i + 1 :]:
+                            next_line_lower = next_line.lower()
+                            # Stop if we hit another field marker
+                            if ":" in next_line and any(
+                                field in next_line_lower
+                                for field in [
+                                    "violations",
+                                    "combined",
+                                    "score",
+                                    "ethics",
+                                ]
+                            ):
+                                break
+                            if next_line.strip():
+                                content += " " + next_line.strip()
+                            else:
+                                break
+
+                    if content:
+                        sustainability_info = content
+                        ctx.logger.info(
+                            f"✓ Extracted SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
+                        )
 
                 elif "violations:" in line_lower:
                     violations_str = line.split(":", 1)[-1].strip().lower()
                     if violations_str != "none" and violations_str:
                         violations = [v.strip() for v in violations_str.split(",")]
                     ctx.logger.info(f"✓ Extracted VIOLATIONS: {violations}")
+
+            # Fallback: If we still have "Insufficient data", try to extract from raw text
+            if ethics_info == "Insufficient data":
+                ctx.logger.info("Attempting fallback extraction for ethics_info...")
+                # Try to find ethics-related content in the response
+                if "ethics" in response_text.lower():
+                    ethics_section = self._extract_section_content(
+                        response_text, "ethics", "sustainability"
+                    )
+                    if ethics_section:
+                        ethics_info = ethics_section
+                        ctx.logger.info(
+                            f"✓ Fallback ETHICS_INFO: {ethics_info[:60]}..."
+                        )
+
+            if sustainability_info == "Insufficient data":
+                ctx.logger.info(
+                    "Attempting fallback extraction for sustainability_info..."
+                )
+                # Try to find sustainability-related content in the response
+                if "sustainability" in response_text.lower():
+                    sustainability_section = self._extract_section_content(
+                        response_text, "sustainability", "violations"
+                    )
+                    if sustainability_section:
+                        sustainability_info = sustainability_section
+                        ctx.logger.info(
+                            f"✓ Fallback SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
+                        )
 
             # If combined_score wasn't provided, calculate it
             if combined_score == 50.0:
@@ -481,6 +720,12 @@ class ComplianceRAGSystem:
             ctx.logger.info(f"  Ethics: {ethics_score}/100")
             ctx.logger.info(f"  Sustainability: {sustainability_score}/100")
             ctx.logger.info(f"  Combined (Compliance): {combined_score}/100")
+            ctx.logger.info(
+                f"  Ethics Info Extracted: {ethics_info != 'Insufficient data'}"
+            )
+            ctx.logger.info(
+                f"  Sustainability Info Extracted: {sustainability_info != 'Insufficient data'}"
+            )
             ctx.logger.info("=" * 70)
 
             return {
@@ -498,6 +743,40 @@ class ComplianceRAGSystem:
 
             traceback.print_exc()
             return self._generate_fallback_response(supplier_name)
+
+    def _extract_section_content(
+        self, text: str, start_marker: str, end_marker: str, max_length: int = 500
+    ) -> Optional[str]:
+        """
+        Extract content from text between two markers.
+        Used as fallback when standard parsing fails.
+        """
+        try:
+            text_lower = text.lower()
+            start_idx = text_lower.find(start_marker.lower())
+            if start_idx == -1:
+                return None
+
+            # Find the end marker
+            end_idx = text_lower.find(end_marker.lower(), start_idx + len(start_marker))
+            if end_idx == -1:
+                end_idx = len(text)
+
+            content = text[start_idx:end_idx].strip()
+            # Remove the start marker itself
+            if content.lower().startswith(start_marker.lower()):
+                content = content[len(start_marker) :].strip()
+
+            # Clean up the content
+            content = content.replace("\n", " ").strip()
+            # Remove trailing colons if any
+            content = content.lstrip(":").strip()
+
+            if content and len(content) > 10:
+                return content[:max_length]
+            return None
+        except Exception:
+            return None
 
     def _generate_fallback_response(self, supplier_name: str) -> Dict[str, Any]:
         """Generate fallback response when RAG is unavailable"""
