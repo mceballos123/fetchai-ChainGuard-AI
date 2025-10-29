@@ -9,6 +9,7 @@ from typing import TypedDict, List, Dict, Any, Optional, Annotated
 from langchain_core.messages import BaseMessage
 import operator
 
+
 class SupplierInputState(TypedDict):
     """Initial input from user via ASI:1"""
 
@@ -48,9 +49,9 @@ class SupplierWorkflowState(TypedDict):
     sustainability_info: Optional[str]
     violations: Optional[List[str]]
 
-    # Financial agent results (future)
-    financial_score: Optional[float]
-    financial_info: Optional[str]
+    # Financial agent results - RAG from financial_files/
+    financial_score: Optional[float]  # 0-100, higher = lower risk (better)
+    financial_info: Optional[str]  # Summary: tariffs, inflation, economic risks
 
     # Risk agent results (future)
     risk_score: Optional[float]
@@ -64,6 +65,7 @@ class SupplierWorkflowState(TypedDict):
     # Message history for LangGraph
     messages: Annotated[List[BaseMessage], operator.add]
 
+
 class SupplierOutputState(TypedDict):
     """Final output returned to user via ASI:1"""
 
@@ -72,8 +74,11 @@ class SupplierOutputState(TypedDict):
     supplier_location: str
     supplier_country: str
     compliance_score: float
+    financial_score: float
     overall_message: str  # Human-readable summary
-    passed_compliance: bool  # True if score >= 75
+    passed_compliance: bool  # True if compliance >= 75
+    passed_financial: bool  # True if financial >= 70 (lower risk)
+
 
 class CompliancePrivateState(TypedDict):
     """Private state used only in compliance node"""

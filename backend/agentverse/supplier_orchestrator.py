@@ -14,8 +14,9 @@ from uagents_core.contrib.protocols.chat import (
     chat_protocol_spec,
 )
 
-# Import compliance models
+# Import compliance and financial models
 from backend.models.compliance import ComplianceRequest, ComplianceResponse
+from backend.models.financial import FinancialRequest, FinancialResponse
 
 # Import test utilities
 from backend.test_func import (
@@ -32,13 +33,16 @@ supplier_orchestrator = Agent(
     name="supplier_orchestrator",
     seed=SUPPLIER_ORCHESTRATOR_SEED,
     port=8000,
-    mailbox=True,  # =
+    mailbox=True,
 )
 
 chat_proto = Protocol(name="chat_protocol", spec=chat_protocol_spec)
 
 COMPLIANCE_AGENT_ADDRESS = os.getenv(
     "COMPLIANCE_AGENT_ADDRESS",
+)
+FINANCIAL_AGENT_ADDRESS = os.getenv(
+    "FINANCIAL_AGENT_ADDRESS",
 )
 
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
@@ -52,8 +56,12 @@ async def startup(ctx: Context):
     ctx.logger.info(f"Agent Name: {ctx.agent.name}")
     ctx.logger.info(f"Agent Address: {ctx.agent.address}")
     ctx.logger.info(f"Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+    ctx.logger.info(f"Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
 
     ctx.storage.set("active_sessions", {})
+
+    # Storage for tracking responses from both agents
+    ctx.storage.set("pending_responses", {})
 
     # Initialize message trace for debugging
     ctx.storage.set(
@@ -130,10 +138,24 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
     ctx.storage.set("active_sessions", active_sessions)
     ctx.logger.info(f"Session stored with ID: {msg_id}")
 
-    # Step 4: Forward to Compliance Agent
-    ctx.logger.info(f"Forwarding to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+    # Step 4: Forward to BOTH Compliance AND Financial Agents
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📤 FORWARDING TO BOTH AGENTS")
+    ctx.logger.info("=" * 70)
+
+    # Initialize pending responses tracking for this request
+    pending_responses = ctx.storage.get("pending_responses") or {}
+    pending_responses[msg_id] = {
+        "compliance_response": None,
+        "financial_response": None,
+        "sender": sender,
+        "user_query": user_query,
+    }
+    ctx.storage.set("pending_responses", pending_responses)
 
     try:
+        # Send to Compliance Agent
+        ctx.logger.info(f"📨 Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
         compliance_request = ComplianceRequest(
             request_id=msg_id,
             supplier_name=user_query,
@@ -145,7 +167,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         # Validate request before sending
         is_valid, error_msg = validate_request_before_sending(ctx, compliance_request)
         if not is_valid:
-            raise ValueError(f"Request validation failed: {error_msg}")
+            raise ValueError(f"Compliance request validation failed: {error_msg}")
 
         await ctx.send(COMPLIANCE_AGENT_ADDRESS, compliance_request)
 
@@ -161,10 +183,42 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             },
         )
 
-        ctx.logger.info(f"ComplianceRequest sent to Compliance Agent")
+        ctx.logger.info(f"✓ ComplianceRequest sent to Compliance Agent")
+
+        # Send to Financial Agent
+        ctx.logger.info(f"📨 Sending to Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
+        financial_request = FinancialRequest(
+            request_id=msg_id,
+            supplier_name=user_query,
+            industry="general",
+            timestamp="",
+        )
+
+        await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
+
+        # Log transmission
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "FinancialRequest",
+            msg_id,
+            {
+                "supplier_name": financial_request.supplier_name,
+                "industry": financial_request.industry,
+            },
+        )
+
+        ctx.logger.info(f"✓ FinancialRequest sent to Financial Agent")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("⏳ WAITING FOR BOTH RESPONSES...")
+        ctx.logger.info("=" * 70)
 
     except Exception as e:
-        ctx.logger.error(f"Error sending to Compliance Agent: {e}")
+        ctx.logger.error(f"Error sending to agents: {e}")
+
+        # Clean up pending responses
+        pending_responses.pop(msg_id, None)
+        ctx.storage.set("pending_responses", pending_responses)
 
         # Send error response to user
         error_response = ChatMessage(
@@ -173,7 +227,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             content=[
                 TextContent(
                     type="text",
-                    text=f"Error forwarding request to Compliance Agent: {str(e)}",
+                    text=f"Error forwarding request to agents: {str(e)}",
                 )
             ],
         )
@@ -198,9 +252,9 @@ compliance_protocol = Protocol(name="compliance_response_protocol", version="1.0
 async def handle_compliance_response(
     ctx: Context, sender: str, msg: ComplianceResponse
 ):
-    # Handles response from the compliance agent
+    """Handle compliance response and wait for financial response before sending to user"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info("Received Compliance Response")
+    ctx.logger.info("✅ Received Compliance Response (1/2)")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Compliance Agent
@@ -216,75 +270,219 @@ async def handle_compliance_response(
     )
 
     try:
-        # Retrieve session information
-        active_sessions = ctx.storage.get("active_sessions") or {}
-        user_sender = active_sessions.get(msg.request_id, {}).get("sender")
+        # Store compliance response in pending_responses
+        pending_responses = ctx.storage.get("pending_responses") or {}
 
-        if not user_sender:
-            ctx.logger.warning(f"Could not find session for request {msg.request_id}")
+        if msg.request_id not in pending_responses:
+            ctx.logger.warning(
+                f"No pending response tracking for request {msg.request_id}"
+            )
             return
 
-        ctx.logger.info(f"Found session for request {msg.request_id}")
-        ctx.logger.info(f"Original sender: {user_sender}")
+        pending_responses[msg.request_id]["compliance_response"] = msg.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
 
-        # Step 1: Format compliance response
-        approval_status = " APPROVED" if msg.compliance_score >= 75 else " REJECTED"
-        status = (
-            "APPROVED for partnership"
-            if msg.compliance_score >= 75
-            else "NOT APPROVED - below compliance threshold"
-        )
+        ctx.logger.info(f"✓ Compliance response stored")
+        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"   Score: {msg.compliance_score}/100")
 
-        # Build response message
-        response_text = f"""
-{approval_status}
-
-Supplier: {msg.supplier_name}
-Compliance Score: {msg.compliance_score}/100
-Status: {status}
-
-Ethics & Sustainability:
-  • Ethics Info: {msg.ethics_info or 'N/A'}
-  • Sustainability: {msg.sustainability_info or 'N/A'}
-
-Violations Found: {len(msg.violations)}
-{chr(10).join([f"  • {v}" for v in msg.violations]) if msg.violations else "  None"}
-        """
-
-        # Step 2: Send response back to user via chat
-        ctx.logger.info(f"Sending response to user: {user_sender}")
-
-        response = ChatMessage(
-            timestamp="",
-            msg_id=uuid4(),
-            content=[
-                TextContent(type="text", text=response_text.strip()),
-                EndSessionContent(type="end-session"),
-            ],
-        )
-
-        await ctx.send(user_sender, response)
-
-        log_message_transmission(
-            ctx,
-            "SENT",
-            "ChatMessage",
-            str(response.msg_id),
-            {"type": "compliance_result"},
-        )
-
-        ctx.logger.info(f"✓ Response sent to user")
-
-        # Step 3: Clean up session
-        active_sessions.pop(msg.request_id, None)
-        ctx.storage.set("active_sessions", active_sessions)
-        ctx.logger.info(f"Session cleaned up for request {msg.request_id}")
+        # Check if we have both responses now
+        await check_and_send_combined_response(ctx, msg.request_id)
 
     except Exception as e:
         ctx.logger.error(f"Error handling compliance response: {e}")
         import traceback
 
         traceback.print_exc()
+
+
+# Add Financial Response Protocol
+financial_protocol = Protocol(name="financial_response_protocol", version="1.0")
+
+
+@financial_protocol.on_message(model=FinancialResponse)
+async def handle_financial_response(ctx: Context, sender: str, msg: FinancialResponse):
+    """Handle financial response and wait for compliance response before sending to user"""
+    ctx.logger.info("=" * 60)
+    ctx.logger.info("💰 Received Financial Response (2/2)")
+    ctx.logger.info("=" * 60)
+
+    # Verify message received from Financial Agent
+    log_message_transmission(
+        ctx,
+        "RECEIVED",
+        "FinancialResponse",
+        msg.request_id,
+        {
+            "supplier_name": msg.supplier_name,
+            "financial_score": msg.financial_score,
+        },
+    )
+
+    try:
+        # Store financial response in pending_responses
+        pending_responses = ctx.storage.get("pending_responses") or {}
+
+        if msg.request_id not in pending_responses:
+            ctx.logger.warning(
+                f"No pending response tracking for request {msg.request_id}"
+            )
+            return
+
+        pending_responses[msg.request_id]["financial_response"] = msg.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
+
+        ctx.logger.info(f"✓ Financial response stored")
+        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"   Score: {msg.financial_score}/100")
+
+        # Check if we have both responses now
+        await check_and_send_combined_response(ctx, msg.request_id)
+
+    except Exception as e:
+        ctx.logger.error(f"Error handling financial response: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+async def check_and_send_combined_response(ctx: Context, request_id: str):
+    """Check if both responses are received, combine them, and send to user"""
+    pending_responses = ctx.storage.get("pending_responses") or {}
+
+    if request_id not in pending_responses:
+        ctx.logger.warning(f"No pending response for request {request_id}")
+        return
+
+    response_data = pending_responses[request_id]
+    compliance_response = response_data.get("compliance_response")
+    financial_response = response_data.get("financial_response")
+
+    # Check if we have BOTH responses
+    if compliance_response is None or financial_response is None:
+        ctx.logger.info(f"⏳ Still waiting for responses...")
+        ctx.logger.info(f"   Compliance: {'✓' if compliance_response else '✗'}")
+        ctx.logger.info(f"   Financial: {'✓' if financial_response else '✗'}")
+        return
+
+    # We have both responses! Combine them
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("🎉 BOTH RESPONSES RECEIVED - COMBINING RESULTS")
+    ctx.logger.info("=" * 70)
+
+    user_sender = response_data.get("sender")
+    user_query = response_data.get("user_query")
+
+    if not user_sender:
+        ctx.logger.error(f"No sender found for request {request_id}")
+        return
+
+    # Determine overall approval status
+    compliance_passed = compliance_response.get("compliance_score", 0) >= 75
+    financial_passed = financial_response.get("financial_score", 0) >= 70
+    overall_approved = compliance_passed and financial_passed
+
+    # Build combined response message
+    if overall_approved:
+        approval_status = "✅ APPROVED FOR PARTNERSHIP"
+        status_line = f"Status: APPROVED - {compliance_response.get('supplier_name')} meets both compliance and financial requirements"
+    else:
+        approval_status = "❌ NOT APPROVED"
+        reasons = []
+        if not compliance_passed:
+            reasons.append("compliance score below threshold (75)")
+        if not financial_passed:
+            reasons.append("financial risk too high (score below 70)")
+        status_line = f"Status: NOT APPROVED - {', '.join(reasons)}"
+
+    response_text = f"""
+{approval_status}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊 SUPPLIER ANALYSIS REPORT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Supplier: {compliance_response.get('supplier_name')}
+{status_line}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅ COMPLIANCE ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Overall Compliance Score: {compliance_response.get('compliance_score')}/100 {'✓ PASSED' if compliance_passed else '✗ FAILED'}
+
+Ethics & Worker Treatment:
+  • {compliance_response.get('ethics_info') or 'N/A'}
+
+Sustainability Practices:
+  • {compliance_response.get('sustainability_info') or 'N/A'}
+
+Violations Found: {len(compliance_response.get('violations', []))}
+{chr(10).join([f"  • {v}" for v in compliance_response.get('violations', [])]) if compliance_response.get('violations') else "  • None"}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 FINANCIAL RISK ANALYSIS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Financial Risk Score: {financial_response.get('financial_score')}/100 {'✓ LOW RISK' if financial_passed else '✗ HIGH RISK'}
+(Higher score = Lower financial risk)
+
+Financial Details:
+  • {financial_response.get('financial_details') or 'N/A'}
+
+Risk Factors: {len(financial_response.get('risk_factors', []))}
+{chr(10).join([f"  • {r}" for r in financial_response.get('risk_factors', [])]) if financial_response.get('risk_factors') else "  • Minimal risks identified"}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 RECOMMENDATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{f"✅ RECOMMENDED: {compliance_response.get('supplier_name')} is approved for partnership based on strong compliance practices and acceptable financial risk profile." if overall_approved else f"❌ NOT RECOMMENDED: {compliance_response.get('supplier_name')} does not meet the minimum requirements for partnership. {'Consider alternative suppliers.' if not compliance_passed and not financial_passed else 'Review the failing criteria before proceeding.'}"}
+    """
+
+    # Send combined response back to user via chat
+    ctx.logger.info(f"📤 Sending combined response to user: {user_sender}")
+
+    response = ChatMessage(
+        timestamp="",
+        msg_id=uuid4(),
+        content=[
+            TextContent(type="text", text=response_text.strip()),
+            EndSessionContent(type="end-session"),
+        ],
+    )
+
+    await ctx.send(user_sender, response)
+
+    log_message_transmission(
+        ctx,
+        "SENT",
+        "ChatMessage",
+        str(response.msg_id),
+        {"type": "combined_result", "approved": overall_approved},
+    )
+
+    ctx.logger.info(f"✓ Combined response sent to user")
+    ctx.logger.info(
+        f"   Overall Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}"
+    )
+    ctx.logger.info(
+        f"   Compliance: {compliance_response.get('compliance_score')}/100 {'✓' if compliance_passed else '✗'}"
+    )
+    ctx.logger.info(
+        f"   Financial: {financial_response.get('financial_score')}/100 {'✓' if financial_passed else '✗'}"
+    )
+
+    # Clean up session and pending responses
+    active_sessions = ctx.storage.get("active_sessions") or {}
+    active_sessions.pop(request_id, None)
+    ctx.storage.set("active_sessions", active_sessions)
+
+    pending_responses.pop(request_id, None)
+    ctx.storage.set("pending_responses", pending_responses)
+
+    ctx.logger.info(f"✓ Session cleaned up for request {request_id}")
+    ctx.logger.info("=" * 70)
 
 
 @chat_proto.on_message(ChatAcknowledgement)
@@ -296,6 +494,7 @@ async def handle_acknowledgement(ctx: Context, sender: str, msg: ChatAcknowledge
 
 supplier_orchestrator.include(chat_proto, publish_manifest=True)
 supplier_orchestrator.include(compliance_protocol, publish_manifest=True)
+supplier_orchestrator.include(financial_protocol, publish_manifest=True)
 
 if __name__ == "__main__":
     supplier_orchestrator.run()
