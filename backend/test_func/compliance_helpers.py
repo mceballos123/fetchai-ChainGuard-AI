@@ -10,6 +10,7 @@ from datetime import datetime
 from uagents import Context
 
 from backend.models.compliance import ComplianceResponse
+from backend.models.financial import FinancialResponse
 from .test_agent_communication import verify_compliance_response_format
 
 
@@ -152,8 +153,45 @@ def validate_response_before_sending(
             ctx.logger.warning(f"Response validation failed: {error_msg}")
             return False, error_msg
 
-        ctx.logger.info("✓ Response validation passed")
+        ctx.logger.info("Response validation passed")
         return True, ""
     except Exception as e:
         ctx.logger.error(f"Error validating response: {e}")
+        return False, str(e)
+
+
+def validate_financial_response_before_sending(
+    ctx: Context, response: FinancialResponse
+) -> Tuple[bool, str]:
+    """
+    Validate a financial response before sending to orchestrator.
+    This is separate from compliance responses - financial responses
+    do NOT include compliance scores.
+
+    Args:
+        ctx: Context object
+        response: FinancialResponse to validate
+
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        # Check that required fields are present
+        if not hasattr(response, "request_id") or not response.request_id:
+            return False, "Missing or invalid request_id"
+
+        if not hasattr(response, "supplier_name") or not response.supplier_name:
+            return False, "Missing or invalid supplier_name"
+
+        if not hasattr(response, "financial_score") or response.financial_score is None:
+            return False, "Missing or invalid financial_score"
+
+        # Validate financial score is in valid range
+        if not (0 <= response.financial_score <= 100):
+            return False, f"Financial score out of range: {response.financial_score}"
+
+        ctx.logger.info("Response validation passed")
+        return True, ""
+    except Exception as e:
+        ctx.logger.error(f"Error validating financial response: {e}")
         return False, str(e)

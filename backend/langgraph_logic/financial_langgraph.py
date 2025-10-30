@@ -41,23 +41,23 @@ def _resolve_financial_path() -> Path:
     if FILE_PATH and FILE_PATH != "None":
         resolved = Path(FILE_PATH)
         if resolved.exists():
-            print(f"✓ Using ENV path: {resolved}")
+            print(f"Using ENV path: {resolved}")
             return resolved
 
     # Option 2: Try relative path from backend directory
     relative_path = Path(__file__).parent.parent / "financial_files"
     if relative_path.exists():
-        print(f"✓ Using relative path: {relative_path}")
+        print(f"Using relative path: {relative_path}")
         return relative_path
 
     # Option 3: Try from current working directory
     cwd_path = Path.cwd() / "backend" / "financial_files"
     if cwd_path.exists():
-        print(f"✓ Using CWD path: {cwd_path}")
+        print(f"Using CWD path: {cwd_path}")
         return cwd_path
 
     # Fallback: Return the most likely path (will error appropriately in _load_financial_files)
-    print(f"⚠ No financial files found in any expected location")
+    print(f"No financial files found in any expected location")
     print(f"  Checked: {FILE_PATH}, {relative_path}, {cwd_path}")
     return relative_path
 
@@ -95,7 +95,7 @@ class FinancialRAGSystem:
     async def initialize(self, ctx: Context) -> bool:
 
         try:
-            ctx.logger.info("💰 Initializing Financial RAG System...")
+            ctx.logger.info("Initializing Financial RAG System...")
 
             # Step 1: Load financial files
             ctx.logger.info(f"Loading financial files from {FINANCIAL_FILES_DIR}")
@@ -113,7 +113,7 @@ class FinancialRAGSystem:
                 return False
 
             self.initialized = True
-            ctx.logger.info("✓ Financial RAG System initialized successfully!")
+            ctx.logger.info("Financial RAG System initialized successfully!")
             return True
 
         except Exception as e:
@@ -129,7 +129,7 @@ class FinancialRAGSystem:
             # Validate path exists
             if not FINANCIAL_FILES_DIR.exists():
                 ctx.logger.error(
-                    f"❌ Financial files directory not found: {FINANCIAL_FILES_DIR}"
+                    f"Financial files directory not found: {FINANCIAL_FILES_DIR}"
                 )
                 ctx.logger.error(f"Current working directory: {Path.cwd()}")
                 ctx.logger.error(
@@ -139,7 +139,7 @@ class FinancialRAGSystem:
 
             # List files before loading
             files_in_dir = list(FINANCIAL_FILES_DIR.glob("*.txt"))
-            ctx.logger.info(f"📁 Files found in directory: {len(files_in_dir)}")
+            ctx.logger.info(f"Files found in directory: {len(files_in_dir)}")
             for f in files_in_dir:
                 ctx.logger.info(f"   - {f.name}")
 
@@ -149,18 +149,18 @@ class FinancialRAGSystem:
 
             # Validation checks
             if not self.documents:
-                ctx.logger.error("❌ No documents found in financial_files folder")
+                ctx.logger.error("No documents found in financial_files folder")
                 return False
 
             # Ensure we have all 5 expected documents
             expected_count = 5
             if len(self.documents) < expected_count:
                 ctx.logger.warning(
-                    f"⚠️ Only loaded {len(self.documents)} documents, expected {expected_count}"
+                    f"Only loaded {len(self.documents)} documents, expected {expected_count}"
                 )
 
             ctx.logger.info(
-                f"✓ Successfully loaded {len(self.documents)} financial documents"
+                f"Successfully loaded {len(self.documents)} financial documents"
             )
             for i, doc in enumerate(self.documents, 1):
                 file_name = doc.metadata.get("file_name", "Unknown")
@@ -183,7 +183,7 @@ class FinancialRAGSystem:
         """
         try:
             ctx.logger.info(
-                f"🔍 Filtering financial documents to supplier: {supplier_name}"
+                f"Filtering financial documents to supplier: {supplier_name}"
             )
             ctx.logger.info(f"Available files:")
 
@@ -209,27 +209,27 @@ class FinancialRAGSystem:
                 # Strategy 1: Exact match on file name
                 if normalized_supplier == doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (exact): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (exact): {doc_file_name}")
 
                 # Strategy 2: Partial match (supplier name contains or is contained in file name)
                 elif normalized_supplier in doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (partial): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (partial): {doc_file_name}")
 
                 elif doc_file_name.replace("_", " ") in normalized_supplier:
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (file in supplier): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (file in supplier): {doc_file_name}")
 
                 # Strategy 3: Key word matching
                 elif any(word in doc_file_name for word in normalized_supplier.split()):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (keyword): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (keyword): {doc_file_name}")
                 else:
-                    ctx.logger.info(f"✗ EXCLUDED: {doc_file_name}")
+                    ctx.logger.info(f"EXCLUDED: {doc_file_name}")
 
             if not filtered_docs:
                 ctx.logger.error(
-                    f"✗ No financial documents found for supplier: '{supplier_name}'"
+                    f"No financial documents found for supplier: '{supplier_name}'"
                 )
                 ctx.logger.error(f"  Searched for: '{normalized_supplier}'")
                 ctx.logger.error(f"  Available files:")
@@ -242,7 +242,7 @@ class FinancialRAGSystem:
             # Re-index with only the selected supplier
             self.documents = filtered_docs
             ctx.logger.info(
-                f"✓ Filtered to {len(filtered_docs)} financial document(s) for: {supplier_name}"
+                f"Filtered to {len(filtered_docs)} financial document(s) for: {supplier_name}"
             )
             ctx.logger.info(f"  Now analyzing financial data for: {supplier_name}")
             return True
@@ -270,7 +270,7 @@ class FinancialRAGSystem:
 
             if PINECONE_INDEX_NAME_FINANCIAL not in existing_indexes:
                 ctx.logger.info(
-                    f"📊 Creating new Pinecone index: {PINECONE_INDEX_NAME_FINANCIAL}"
+                    f"Creating new Pinecone index: {PINECONE_INDEX_NAME_FINANCIAL}"
                 )
                 pc.create_index(
                     name=PINECONE_INDEX_NAME_FINANCIAL,
@@ -280,7 +280,7 @@ class FinancialRAGSystem:
                 )
             else:
                 ctx.logger.info(
-                    f"✓ Using existing Pinecone index: {PINECONE_INDEX_NAME_FINANCIAL}"
+                    f"Using existing Pinecone index: {PINECONE_INDEX_NAME_FINANCIAL}"
                 )
 
             # Get Pinecone index
@@ -297,7 +297,7 @@ class FinancialRAGSystem:
                 similarity_top_k=5, response_mode="tree_summarize", verbose=True
             )
 
-            ctx.logger.info("✓ Pinecone vector store initialized for financial data")
+            ctx.logger.info("Pinecone vector store initialized for financial data")
             return True
 
         except Exception as e:
@@ -329,7 +329,7 @@ class FinancialRAGSystem:
                     except Exception as e:
                         ctx.logger.warning(f"Error indexing financial node: {e}")
 
-                ctx.logger.info("✓ Financial documents indexed in Pinecone")
+                ctx.logger.info("Financial documents indexed in Pinecone")
             else:
                 ctx.logger.warning(
                     "Index not initialized, skipping financial document indexing"
@@ -372,7 +372,7 @@ class FinancialRAGSystem:
         try:
             # Step 1: Filter documents to ONLY the selected supplier
             ctx.logger.info("=" * 60)
-            ctx.logger.info("💰 FINANCIAL DOCUMENT FILTERING PHASE")
+            ctx.logger.info("FINANCIAL DOCUMENT FILTERING PHASE")
             ctx.logger.info("=" * 60)
 
             if not await self.filter_to_supplier(ctx, supplier_name):
@@ -383,12 +383,12 @@ class FinancialRAGSystem:
 
             # Step 2: Financial risk analysis on the selected supplier ONLY
             ctx.logger.info("\n" + "=" * 60)
-            ctx.logger.info("💰 FINANCIAL RISK ANALYSIS PHASE")
+            ctx.logger.info("FINANCIAL RISK ANALYSIS PHASE")
             ctx.logger.info("=" * 60)
 
             # Build financial analysis query
             financial_query = f"""
-            OBJECTIVE FINANCIAL RISK ANALYSIS - Analyze Financial Stability and Risks
+            OBJECTIVE FINANCIAL RISK ANALYSIS - Comprehensive Financial Stability and Risk Assessment
             
             Analyze the financial risk profile of supplier: {supplier_name}
             Industry: {industry}
@@ -399,30 +399,44 @@ class FinancialRAGSystem:
             - 40-59: Significant risks, notable tariffs, inflation issues, or currency volatility
             - 0-39: High risk, severe tariffs, high inflation, economic instability, or trade restrictions
             
-            FINANCIAL RISK FACTORS TO EVALUATE:
-            1. **Tariffs**: Import/export tariffs affecting product costs
-            2. **Inflation**: Local or regional inflation impacting prices
-            3. **Currency Exchange**: Currency volatility and exchange rate risks
-            4. **Economic Stability**: Overall economic conditions in supplier's region
-            5. **Trade Restrictions**: Any trade barriers or sanctions
-            6. **Cost Predictability**: Ability to forecast and maintain stable costs
+            FINANCIAL RISK FACTORS TO EVALUATE (PROVIDE DETAILED INFORMATION FOR EACH):
+            1. **Tariffs**: Import/export tariffs affecting product costs - Include specific tariff rates and impact
+            2. **Inflation**: Local or regional inflation impacting prices - Include inflation rates and trends
+            3. **Currency Exchange**: Currency volatility and exchange rate risks - Specific currency concerns
+            4. **Economic Stability**: Overall economic conditions in supplier's region - Market stability assessment
+            5. **Trade Restrictions**: Any trade barriers, sanctions, or restrictions - Specific restrictions if any
+            6. **Cost Predictability**: Ability to forecast and maintain stable costs - Cost stability analysis
+            7. **Operating Costs**: Average monthly or annual operating expenses - Actual cost figures
+            8. **Payment Terms**: Credit terms and payment reliability - Terms and conditions
             
             Based on the financial documents for this supplier, provide:
             1. Financial Risk Score (0-100, where higher = lower risk = better)
-            2. Summary of financial details (2-3 sentences covering tariffs, inflation, economic factors)
-            3. List of specific risk factors or concerns (or "minimal risks" if applicable)
+            2. Detailed financial summary (3-4 comprehensive sentences covering):
+               - Operating costs and financial stability
+               - Specific tariff rates and their impact on product costs
+               - Currency exchange or inflation concerns if applicable
+               - Overall economic conditions affecting the supplier
+            3. List of specific risk factors with details (or "minimal risks" if applicable)
+            
+            CRITICAL FORMATTING REQUIREMENTS:
+            - Each section must be clearly separated with proper spacing
+            - Include specific numbers and percentages where available
+            - Use complete, grammatically correct sentences
+            - Avoid concatenating text or removing spaces
+            - Format currency values clearly (e.g., USD, EUR, etc.)
             
             IMPORTANT:
-            - Be specific about tariff rates if mentioned
-            - Note inflation trends and their impact
-            - Identify currency or exchange rate concerns
-            - Mention any trade restrictions or sanctions
-            - Consider cost stability and predictability
+            - Be specific about tariff rates if mentioned (e.g., "15% tariffs on specialty coffee beans")
+            - Note inflation trends with percentages and their impact
+            - Identify currency or exchange rate concerns with specific currencies
+            - Mention any trade restrictions or sanctions with details
+            - Consider cost stability and predictability with actual figures
+            - Provide context about how these factors affect the supplier's business
             
-            Format your response exactly as follows:
+            Format your response exactly as follows (ensure proper spacing between lines):
             FINANCIAL_SCORE: [number between 0-100, where higher is better]
-            FINANCIAL_DETAILS: [concise summary of financial situation, tariffs, inflation, risks]
-            RISK_FACTORS: [comma-separated list of specific risks, or "minimal risks"]
+            FINANCIAL_DETAILS: [comprehensive 3-4 sentence summary with specific details about operating costs, tariffs, inflation, currency risks, and economic conditions]
+            RISK_FACTORS: [comma-separated list of specific risks with details, or "minimal risks"]
             """
 
             ctx.logger.info(
@@ -435,7 +449,7 @@ class FinancialRAGSystem:
             # Parse the response
             result = await self._parse_rag_response(ctx, str(response), supplier_name)
 
-            ctx.logger.info(f"✓ Financial risk analysis complete!")
+            ctx.logger.info(f"Financial risk analysis complete!")
             ctx.logger.info(f"   Supplier: {supplier_name}")
             ctx.logger.info(f"   Financial Score: {result['financial_score']}/100")
 
@@ -474,9 +488,7 @@ class FinancialRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         financial_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(
-                            f"✓ Extracted FINANCIAL_SCORE: {financial_score}"
-                        )
+                        ctx.logger.info(f"Extracted FINANCIAL_SCORE: {financial_score}")
                     except (ValueError, IndexError) as e:
                         ctx.logger.warning(
                             f"Could not parse financial score from: {line} - {e}"
@@ -488,35 +500,60 @@ class FinancialRAGSystem:
                     content = line.split(":", 1)[-1].strip()
 
                     # If this line is empty or minimal, try to get content from next lines
-                    if not content or len(content) < 20:
-                        # Look ahead for more content
+                    if not content or len(content) < 30:
+                        # Look ahead for more content (up to 10 lines max)
+                        collected_lines = [content] if content else []
+                        line_count = 0
+
                         for next_line in lines[i + 1 :]:
+                            line_count += 1
+                            if line_count > 10:  # Prevent infinite collection
+                                break
+
                             next_line_lower = next_line.lower()
+                            next_line_stripped = next_line.strip()
+
                             # Stop if we hit another field marker
-                            if ":" in next_line and any(
+                            if ":" in next_line_lower and any(
                                 field in next_line_lower
                                 for field in [
-                                    "risk_factors",
-                                    "score",
+                                    "risk_factors:",
+                                    "financial_score:",
                                 ]
                             ):
                                 break
-                            if next_line.strip():
-                                content += " " + next_line.strip()
+
+                            # Add non-empty lines with proper spacing
+                            if next_line_stripped:
+                                if collected_lines and not collected_lines[-1].endswith(
+                                    " "
+                                ):
+                                    collected_lines.append(" ")
+                                collected_lines.append(next_line_stripped)
                             else:
+                                # Empty line indicates end of section
                                 break
 
+                        # Join with proper spacing
+                        content = "".join(collected_lines)
+
                     if content:
+                        # Clean up any accidental text concatenation issues
+                        # Fix cases like "beansfrC" -> "beans from"
+                        content = re.sub(r"(\w)([A-Z][a-z])", r"\1 \2", content)
+                        # Ensure proper spacing around common words
+                        content = re.sub(r"\s+", " ", content).strip()
+
                         financial_details = content
                         ctx.logger.info(
-                            f"✓ Extracted FINANCIAL_DETAILS: {financial_details[:60]}..."
+                            f"Extracted FINANCIAL_DETAILS: {financial_details[:100]}..."
                         )
 
                 elif "risk_factors:" in line_lower:
                     risk_str = line.split(":", 1)[-1].strip().lower()
                     if risk_str != "minimal risks" and risk_str and risk_str != "none":
                         risk_factors = [r.strip() for r in risk_str.split(",")]
-                    ctx.logger.info(f"✓ Extracted RISK_FACTORS: {risk_factors}")
+                    ctx.logger.info(f"Extracted RISK_FACTORS: {risk_factors}")
 
             ctx.logger.info("=" * 70)
             ctx.logger.info(f"FINAL PARSED FINANCIAL DATA:")
@@ -646,7 +683,7 @@ def financial_check_node(
     Output: financial_score, financial_details, risk_factors
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("💰 FINANCIAL RISK CHECK NODE")
+    ctx.logger.info("FINANCIAL RISK CHECK NODE")
     ctx.logger.info("=" * 70)
 
     try:
@@ -665,13 +702,13 @@ def financial_check_node(
         state["financial_info"] = rag_result.get("financial_details", "N/A")
         state["current_step"] = "financial_check_complete"
 
-        ctx.logger.info(f"✓ Financial Score: {state['financial_score']}/100")
-        ctx.logger.info(f"✓ Risk Factors: {len(rag_result.get('risk_factors', []))}")
+        ctx.logger.info(f"Financial Score: {state['financial_score']}/100")
+        ctx.logger.info(f"Risk Factors: {len(rag_result.get('risk_factors', []))}")
 
         return state
 
     except Exception as e:
-        ctx.logger.error(f"❌ Error in financial check: {e}")
+        ctx.logger.error(f"Error in financial check: {e}")
         state["current_step"] = "financial_check_failed"
         state["error_message"] = f"Financial check failed: {str(e)}"
         state["financial_score"] = 0.0
@@ -712,7 +749,7 @@ def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflow
     Prepares data to send to orchestrator agent.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("✅ SUCCESS NODE - FINANCIAL RISK APPROVED")
+    ctx.logger.info("SUCCESS NODE - FINANCIAL RISK APPROVED")
     ctx.logger.info("=" * 70)
 
     state["current_step"] = "financial_approved"
@@ -733,7 +770,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     Prepares error response.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("❌ ERROR NODE - FINANCIAL RISK REJECTED")
+    ctx.logger.info("ERROR NODE - FINANCIAL RISK REJECTED")
     ctx.logger.info("=" * 70)
 
     financial_score = state.get("financial_score", 0.0)
@@ -773,7 +810,7 @@ def build_financial_workflow(
     Returns:
         Compiled StateGraph workflow
     """
-    ctx.logger.info("🏗️ Building Financial LangGraph Workflow...")
+    ctx.logger.info("Building Financial LangGraph Workflow...")
 
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
@@ -801,6 +838,6 @@ def build_financial_workflow(
     # Compile workflow
     compiled_workflow = workflow.compile()
 
-    ctx.logger.info("✓ Financial workflow built successfully!")
+    ctx.logger.info("Financial workflow built successfully!")
 
     return compiled_workflow

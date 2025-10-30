@@ -140,7 +140,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     # Step 4: Forward to BOTH Compliance AND Financial Agents
     ctx.logger.info("=" * 70)
-    ctx.logger.info("📤 FORWARDING TO BOTH AGENTS")
+    ctx.logger.info("FORWARDING TO BOTH AGENTS")
     ctx.logger.info("=" * 70)
 
     # Initialize pending responses tracking for this request
@@ -155,7 +155,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     try:
         # Send to Compliance Agent
-        ctx.logger.info(f"📨 Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+        ctx.logger.info(f" Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
         compliance_request = ComplianceRequest(
             request_id=msg_id,
             supplier_name=user_query,
@@ -183,10 +183,10 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             },
         )
 
-        ctx.logger.info(f"✓ ComplianceRequest sent to Compliance Agent")
+        ctx.logger.info(f"ComplianceRequest sent to Compliance Agent")
 
         # Send to Financial Agent
-        ctx.logger.info(f"📨 Sending to Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
+        ctx.logger.info(f"Sending to Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
         financial_request = FinancialRequest(
             request_id=msg_id,
             supplier_name=user_query,
@@ -210,7 +210,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
         ctx.logger.info(f"✓ FinancialRequest sent to Financial Agent")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("⏳ WAITING FOR BOTH RESPONSES...")
+        ctx.logger.info("WAITING FOR BOTH RESPONSES...")
         ctx.logger.info("=" * 70)
 
     except Exception as e:
@@ -254,7 +254,7 @@ async def handle_compliance_response(
 ):
     """Handle compliance response and wait for financial response before sending to user"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info("✅ Received Compliance Response (1/2)")
+    ctx.logger.info(" Received Compliance Response (1/2)")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Compliance Agent
@@ -282,9 +282,9 @@ async def handle_compliance_response(
         pending_responses[msg.request_id]["compliance_response"] = msg.model_dump()
         ctx.storage.set("pending_responses", pending_responses)
 
-        ctx.logger.info(f"✓ Compliance response stored")
-        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-        ctx.logger.info(f"   Score: {msg.compliance_score}/100")
+        ctx.logger.info(f"Compliance response stored")
+        ctx.logger.info(f"Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"Score: {msg.compliance_score}/100")
 
         # Check if we have both responses now
         await check_and_send_combined_response(ctx, msg.request_id)
@@ -304,7 +304,7 @@ financial_protocol = Protocol(name="financial_response_protocol", version="1.0")
 async def handle_financial_response(ctx: Context, sender: str, msg: FinancialResponse):
     """Handle financial response and wait for compliance response before sending to user"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info("💰 Received Financial Response (2/2)")
+    ctx.logger.info("Received Financial Response (2/2)")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Financial Agent
@@ -360,14 +360,14 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
 
     # Check if we have BOTH responses
     if compliance_response is None or financial_response is None:
-        ctx.logger.info(f"⏳ Still waiting for responses...")
+        ctx.logger.info(f" Still waiting for responses...")
         ctx.logger.info(f"   Compliance: {'✓' if compliance_response else '✗'}")
         ctx.logger.info(f"   Financial: {'✓' if financial_response else '✗'}")
         return
 
     # We have both responses! Combine them
     ctx.logger.info("=" * 70)
-    ctx.logger.info("🎉 BOTH RESPONSES RECEIVED - COMBINING RESULTS")
+    ctx.logger.info("BOTH RESPONSES RECEIVED - COMBINING RESULTS")
     ctx.logger.info("=" * 70)
 
     user_sender = response_data.get("sender")
@@ -384,10 +384,10 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
 
     # Build combined response message
     if overall_approved:
-        approval_status = "✅ APPROVED FOR PARTNERSHIP"
+        approval_status = "APPROVED FOR PARTNERSHIP"
         status_line = f"Status: APPROVED - {compliance_response.get('supplier_name')} meets both compliance and financial requirements"
     else:
-        approval_status = "❌ NOT APPROVED"
+        approval_status = " NOT APPROVED"
         reasons = []
         if not compliance_passed:
             reasons.append("compliance score below threshold (75)")
@@ -399,17 +399,17 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
 {approval_status}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📊 SUPPLIER ANALYSIS REPORT
+ SUPPLIER ANALYSIS REPORT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Supplier: {compliance_response.get('supplier_name')}
 {status_line}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✅ COMPLIANCE ANALYSIS
+COMPLIANCE ANALYSIS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Overall Compliance Score: {compliance_response.get('compliance_score')}/100 {'✓ PASSED' if compliance_passed else '✗ FAILED'}
+Overall Compliance Score: {compliance_response.get('compliance_score')}/100 
 
 Ethics & Worker Treatment:
   • {compliance_response.get('ethics_info') or 'N/A'}
@@ -421,12 +421,11 @@ Violations Found: {len(compliance_response.get('violations', []))}
 {chr(10).join([f"  • {v}" for v in compliance_response.get('violations', [])]) if compliance_response.get('violations') else "  • None"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-💰 FINANCIAL RISK ANALYSIS
+FINANCIAL RISK ANALYSIS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Financial Risk Score: {financial_response.get('financial_score')}/100 {'✓ LOW RISK' if financial_passed else '✗ HIGH RISK'}
+Financial Risk Score: {financial_response.get('financial_score')}/100
 (Higher score = Lower financial risk)
-
 Financial Details:
   • {financial_response.get('financial_details') or 'N/A'}
 
@@ -434,14 +433,14 @@ Risk Factors: {len(financial_response.get('risk_factors', []))}
 {chr(10).join([f"  • {r}" for r in financial_response.get('risk_factors', [])]) if financial_response.get('risk_factors') else "  • Minimal risks identified"}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 RECOMMENDATION
+ RECOMMENDATION
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-{f"✅ RECOMMENDED: {compliance_response.get('supplier_name')} is approved for partnership based on strong compliance practices and acceptable financial risk profile." if overall_approved else f"❌ NOT RECOMMENDED: {compliance_response.get('supplier_name')} does not meet the minimum requirements for partnership. {'Consider alternative suppliers.' if not compliance_passed and not financial_passed else 'Review the failing criteria before proceeding.'}"}
+{f" RECOMMENDED: {compliance_response.get('supplier_name')} is approved for partnership based on strong compliance practices and acceptable financial risk profile." if overall_approved else f" NOT RECOMMENDED: {compliance_response.get('supplier_name')} does not meet the minimum requirements for partnership. {'Consider alternative suppliers.' if not compliance_passed and not financial_passed else 'Review the failing criteria before proceeding.'}"}
     """
 
     # Send combined response back to user via chat
-    ctx.logger.info(f"📤 Sending combined response to user: {user_sender}")
+    ctx.logger.info(f"Sending combined response to user: {user_sender}")
 
     response = ChatMessage(
         timestamp="",
@@ -467,10 +466,10 @@ Risk Factors: {len(financial_response.get('risk_factors', []))}
         f"   Overall Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}"
     )
     ctx.logger.info(
-        f"   Compliance: {compliance_response.get('compliance_score')}/100 {'✓' if compliance_passed else '✗'}"
+        f"Compliance: {compliance_response.get('compliance_score')}/100 "
     )
     ctx.logger.info(
-        f"   Financial: {financial_response.get('financial_score')}/100 {'✓' if financial_passed else '✗'}"
+        f"   Financial: {financial_response.get('financial_score')}/100"
     )
 
     # Clean up session and pending responses

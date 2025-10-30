@@ -1,5 +1,4 @@
 from uagents import Agent, Context, Protocol, Model
-from pydantic import Field
 from typing import List, Optional, Dict, Any
 import os
 import json
@@ -19,7 +18,7 @@ from backend.test_func import (
     verify_compliance_connection,
     log_request_reception,
     log_response_transmission,
-    validate_response_before_sending,
+    validate_financial_response_before_sending,
 )
 
 load_dotenv()
@@ -40,7 +39,7 @@ financial_workflow = None
 @financial_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent, RAG system, and LangGraph workflow on startup"""
-    ctx.logger.info("💰 Financial Agent starting up...")
+    ctx.logger.info("Financial Agent starting up...")
     ctx.logger.info(f"Agent address: {financial_agent.address}")
 
     # Initialize RAG system
@@ -51,14 +50,14 @@ async def startup(ctx: Context):
     success = await rag_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("✓ Financial Agent ready with RAG system!")
+        ctx.logger.info("Financial Agent ready with RAG system!")
 
         # Build LangGraph workflow
         if financial_workflow is None:
             financial_workflow = build_financial_workflow(rag_system, ctx)
-            ctx.logger.info("✓ LangGraph financial workflow built!")
+            ctx.logger.info("LangGraph financial workflow built!")
     else:
-        ctx.logger.warning("⚠️ Financial Agent running in fallback mode (no RAG)")
+        ctx.logger.warning("Financial Agent running in fallback mode (no RAG)")
 
     # Initialize state storage for supplier information
     ctx.storage.set("supplier_history", [])
@@ -74,7 +73,7 @@ async def startup(ctx: Context):
         },
     )
 
-    ctx.logger.info("👂 Listening for FinancialRequest messages...")
+    ctx.logger.info("Listening for FinancialRequest messages...")
 
     # Verify connection on startup
     conn_status = verify_compliance_connection(ctx)
@@ -85,12 +84,12 @@ async def startup(ctx: Context):
 @financial_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info("💰 Financial Agent shutting down...")
+    ctx.logger.info("Financial Agent shutting down...")
 
     # Log final state before shutdown
     supplier_history = ctx.storage.get("supplier_history") or []
-    ctx.logger.info(f"📊 Total suppliers processed: {len(supplier_history)}")
-    ctx.logger.info("✓ Workflow and RAG system cleanup complete")
+    ctx.logger.info(f"Total suppliers processed: {len(supplier_history)}")
+    ctx.logger.info("Workflow and RAG system cleanup complete")
 
 
 def get_supplier_state(ctx: Context) -> Dict[str, Any]:
@@ -137,7 +136,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     if previous_supplier:
         ctx.storage.set("previous_supplier", previous_supplier)
         ctx.logger.info(
-            f"📝 Previous supplier stored: {previous_supplier.get('supplier_name', 'N/A')}"
+            f"Previous supplier stored: {previous_supplier.get('supplier_name', 'N/A')}"
         )
 
     # === STATE MANAGEMENT: Set new current supplier ===
@@ -149,18 +148,18 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         "sender": sender,
     }
     ctx.storage.set("current_supplier", current_supplier_info)
-    ctx.logger.info(f"✅ Current supplier state updated: {msg.supplier_name}")
+    ctx.logger.info(f"Current supplier state updated: {msg.supplier_name}")
 
     # Log state transition if there was a previous supplier
     if previous_supplier:
         ctx.logger.info(
-            f"🔄 State Transition: {previous_supplier.get('supplier_name', 'N/A')} → {msg.supplier_name}"
+            f"State Transition: {previous_supplier.get('supplier_name', 'N/A')} → {msg.supplier_name}"
         )
 
     try:
         # === LANGGRAPH WORKFLOW ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("🔄 RUNNING LANGGRAPH FINANCIAL WORKFLOW")
+        ctx.logger.info("RUNNING LANGGRAPH FINANCIAL WORKFLOW")
         ctx.logger.info("=" * 70)
 
         # Create workflow state from request
@@ -213,7 +212,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             workflow_result = financial_workflow.invoke(workflow_state)
 
         ctx.logger.info("=" * 70)
-        ctx.logger.info(f"✓ Workflow completed: {workflow_result.get('current_step')}")
+        ctx.logger.info(f"Workflow completed: {workflow_result.get('current_step')}")
         ctx.logger.info("=" * 70 + "\n")
 
         # Build response based on workflow result
@@ -227,11 +226,11 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         )
 
         # Validate response before sending
-        is_valid, error_msg = validate_response_before_sending(ctx, response)
+        is_valid, error_msg = validate_financial_response_before_sending(ctx, response)
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        ctx.logger.info(f"✅ Financial analysis complete!")
+        ctx.logger.info(f"Financial analysis complete!")
         ctx.logger.info(f"Financial Score: {response.financial_score}/100")
         ctx.logger.info(f"Status: {workflow_result.get('current_step', 'unknown')}")
 
@@ -246,9 +245,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         supplier_history = ctx.storage.get("supplier_history") or []
         supplier_history.append(current_supplier_info)
         ctx.storage.set("supplier_history", supplier_history)
-        ctx.logger.info(
-            f"📊 Added to history (total: {len(supplier_history)} suppliers)"
-        )
+        ctx.logger.info(f"Added to history (total: {len(supplier_history)} suppliers)")
 
         # Log response transmission
         log_response_transmission(
@@ -262,7 +259,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
 
-        ctx.logger.info(f"📤 Sent FinancialResponse to {sender}")
+        ctx.logger.info(f"Sent FinancialResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing financial request: {e}")
