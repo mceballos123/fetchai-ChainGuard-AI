@@ -206,29 +206,15 @@ class ComplianceRAGSystem:
             )
 
             selection_query = f"""
-            OBJECTIVE SUPPLIER SELECTION - Choose the BEST match, not just any match.
-            
-            Given the company values: {company_values}
+            SUPPLIER SELECTION
+            Company Values: {company_values}
             Industry: {industry}
-            
-            Evaluate each supplier CRITICALLY:
-            - Does the supplier's practices actually align with stated company values?
-            - What are the verified certifications vs claims?
-            - Are there documented concerns or gaps?
-            - Which supplier is the STRONGEST match overall?
             
             Available suppliers:
             {supplier_list}
             
-            Select the ONE supplier that BEST MEETS the company values based on:
-            1. Verified documentation and certifications
-            2. Actual alignment with stated values
-            3. Documented practices, not just claims
-            
-            Choose from this exact list:
-            {supplier_list}
-            
-            Respond with ONLY the exact supplier name from the list, nothing else.
+            Select the ONE best supplier matching company values and industry.
+            Respond with ONLY the exact supplier name from the list.
             """
 
             ctx.logger.info("Using LLM to select best supplier...")
@@ -447,18 +433,79 @@ class ComplianceRAGSystem:
             return self._generate_fallback_response("Unknown")
 
         try:
-            # Step 1: Select the BEST supplier matching company values
+            # Step 1 & 2 COMBINED: Select supplier AND analyze compliance in ONE query
             ctx.logger.info("=" * 60)
-            ctx.logger.info("SUPPLIER SELECTION PHASE")
+            ctx.logger.info("SUPPLIER SELECTION + COMPLIANCE ANALYSIS (COMBINED)")
             ctx.logger.info("=" * 60)
 
-            selected_supplier = await self.select_best_supplier(
-                ctx, company_values, industry
+            # Build combined query for supplier selection + compliance analysis
+            supplier_list = "\n".join(
+                [
+                    f"- {doc.metadata.get('file_name', 'Unknown').replace('.txt', '')}"
+                    for doc in self.documents
+                ]
             )
 
+            combined_query = f"""
+            SELECT BEST SUPPLIER AND ANALYZE COMPLIANCE - Single Query
+
+            Company Values: {company_values}
+            Industry: {industry}
+
+            Available suppliers:
+            {supplier_list}
+
+            TASK 1: Identify the ONE best supplier matching company values
+            TASK 2: Analyze that supplier's compliance
+
+            Score 0-100: 75+ strong verified evidence | 60-74 decent practices | 40-59 basic | <40 poor
+
+            Provide:
+            1. Selected supplier name (exact match from list)
+            2. Ethics score (0-100)
+            3. Sustainability score (0-100)
+            4. Combined score (average)
+            5. Ethics summary (2-3 sentences)
+            6. Sustainability summary (2-3 sentences)
+            7. Violations/gaps or "none verified"
+
+            Response format:
+            SELECTED_SUPPLIER: [name]
+            ETHICS_SCORE: [number]
+            SUSTAINABILITY_SCORE: [number]
+            COMBINED_SCORE: [number]
+            ETHICS_INFO: [summary]
+            SUSTAINABILITY_INFO: [summary]
+            VIOLATIONS: [list or "none verified"]
+            """
+
+            ctx.logger.info("Executing combined query...")
+
+            # Single LLM query for both supplier selection AND compliance analysis
+            response = self.query_engine.query(combined_query)
+            response_text = str(response)
+
+            # Parse response to extract supplier name and compliance data
+            selected_supplier = None
+            for line in response_text.split("\n"):
+                if "SELECTED_SUPPLIER:" in line.upper():
+                    selected_supplier = line.split(":", 1)[-1].strip()
+                    break
+
             if not selected_supplier:
-                ctx.logger.error("Failed to select supplier")
-                return self._generate_fallback_response("Unknown")
+                # Fallback: use first supplier
+                selected_supplier = (
+                    self.documents[0]
+                    .metadata.get("file_name", "Unknown")
+                    .replace(".txt", "")
+                    if self.documents
+                    else "Unknown"
+                )
+                ctx.logger.warning(
+                    f"Could not extract supplier, using: {selected_supplier}"
+                )
+
+            ctx.logger.info(f"Selected supplier: {selected_supplier}")
 
             # Step 2: Filter documents to ONLY the selected supplier
             ctx.logger.info("\n" + "=" * 60)
@@ -469,73 +516,10 @@ class ComplianceRAGSystem:
                 ctx.logger.error("Failed to filter to selected supplier")
                 return self._generate_fallback_response(selected_supplier)
 
-            # Step 3: Compliance analysis on the selected supplier ONLY
-            ctx.logger.info("\n" + "=" * 60)
-            ctx.logger.info("COMPLIANCE ANALYSIS PHASE")
-            ctx.logger.info("=" * 60)
-
-            # Build compliance analysis query
-            compliance_query = f"""
-            OBJECTIVE COMPLIANCE ANALYSIS - Be Critical and Fair
-            
-            Analyze the compliance, ethics, and sustainability of supplier: {selected_supplier}
-            Industry: {industry}
-            Company values to align with: {company_values}
-            
-            SCORING GUIDELINES (Be Strict):
-            - Scores should reflect ACTUAL documented evidence, not potential
-            - Deduct points for any missing certifications or unverified claims
-            - Average score (50-65) indicates "acceptable but with concerns"
-            - High scores (75+) require strong, verified evidence across ALL areas
-            - Only award 90+ for exceptional, well-documented practices
-            - Deduct for any gaps, limitations, or lack of documentation
-            
-            ETHICS EVALUATION (0-100):
-            - 75-100: Verified fair wages (above living wage), comprehensive worker benefits, union support, documented gender equity
-            - 60-74: Decent wages and some benefits, limited verification of practices
-            - 40-59: Basic compliance, insufficient evidence of best practices, mixed or undocumented claims
-            - Below 40: Poor wages, worker concerns, lack of transparency, or unverified claims
-            
-            SUSTAINABILITY EVALUATION (0-100):
-            - 75-100: Verified carbon-negative/neutral, certified organic, proven reforestation, third-party audited
-            - 60-74: Good practices documented, some certifications, limited third-party verification
-            - 40-59: Claims of sustainability but minimal verification, basic practices only
-            - Below 40: Limited sustainability focus, unverified claims, or active environmental concerns
-            
-            Based on the provided documents about this supplier, provide:
-            1. Ethics score (0-100) - based on VERIFIED worker treatment, documented labor practices, actual wage data
-            2. Sustainability score (0-100) - based on VERIFIED environmental practices and third-party evidence
-            3. Combined compliance score (average of ethics + sustainability scores)
-            4. Critical summary of ethical practices (2-3 sentences, note any gaps or unverified claims)
-            5. Critical summary of sustainability practices (2-3 sentences, note certifications or lack thereof)
-            6. List specific violations, concerns, or gaps found (or "none verified" if truly none)
-            
-            IMPORTANT NOTES:
-            - Missing documentation counts as a gap
-            - Unverified claims should lower scores
-            - Look for conflicts between claims and evidence
-            - Be specific about what IS and ISN'T documented
-            
-            Format your response exactly as follows:
-            ETHICS_SCORE: [number between 0-100, be critical]
-            SUSTAINABILITY_SCORE: [number between 0-100, be critical]
-            COMBINED_SCORE: [number between 0-100]
-            ETHICS_INFO: [critical assessment with gaps noted]
-            SUSTAINABILITY_INFO: [critical assessment with gaps noted]
-            VIOLATIONS: [specific concerns, gaps, or "none verified"]
-            """
-
-            ctx.logger.info(f"Analyzing {selected_supplier} (LLM: {self.llm_type})")
-
-            # Query the RAG system with ONLY the selected supplier's documents
-            response = self.query_engine.query(compliance_query)
-
-            # Parse the response
+            # Parse the combined response (already have compliance data)
             result = await self._parse_rag_response(
-                ctx, str(response), selected_supplier
+                ctx, response_text, selected_supplier
             )
-
-            # Add the selected supplier to the response
             result["selected_supplier"] = selected_supplier
 
             ctx.logger.info(f"Compliance analysis complete!")

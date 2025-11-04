@@ -388,55 +388,27 @@ class FinancialRAGSystem:
 
             # Build financial analysis query
             financial_query = f"""
-            OBJECTIVE FINANCIAL RISK ANALYSIS - Comprehensive Financial Stability and Risk Assessment
+            FINANCIAL RISK ANALYSIS: {supplier_name} ({industry})
             
-            Analyze the financial risk profile of supplier: {supplier_name}
-            Industry: {industry}
+            Score 0-100 (higher=lower risk): 80-100 minimal risks | 60-79 moderate | 40-59 significant | 0-39 high
             
-            SCORING GUIDELINES (Higher Score = Lower Risk = Better):
-            - 80-100: Minimal financial risks, stable economy, low/no tariffs, stable currency
-            - 60-79: Moderate risks, some tariffs or inflation concerns, generally stable
-            - 40-59: Significant risks, notable tariffs, inflation issues, or currency volatility
-            - 0-39: High risk, severe tariffs, high inflation, economic instability, or trade restrictions
+            Evaluate:
+            - Tariffs/import costs
+            - Inflation trends
+            - Currency exchange risks
+            - Economic stability
+            - Trade restrictions
+            - Cost predictability
             
-            FINANCIAL RISK FACTORS TO EVALUATE (PROVIDE DETAILED INFORMATION FOR EACH):
-            1. **Tariffs**: Import/export tariffs affecting product costs - Include specific tariff rates and impact
-            2. **Inflation**: Local or regional inflation impacting prices - Include inflation rates and trends
-            3. **Currency Exchange**: Currency volatility and exchange rate risks - Specific currency concerns
-            4. **Economic Stability**: Overall economic conditions in supplier's region - Market stability assessment
-            5. **Trade Restrictions**: Any trade barriers, sanctions, or restrictions - Specific restrictions if any
-            6. **Cost Predictability**: Ability to forecast and maintain stable costs - Cost stability analysis
-            7. **Operating Costs**: Average monthly or annual operating expenses - Actual cost figures
-            8. **Payment Terms**: Credit terms and payment reliability - Terms and conditions
+            Provide:
+            1. Score (0-100)
+            2. Brief summary (2-3 sentences): operating costs, tariffs, inflation, currency risks
+            3. Risk factors list or "minimal risks"
             
-            Based on the financial documents for this supplier, provide:
-            1. Financial Risk Score (0-100, where higher = lower risk = better)
-            2. Detailed financial summary (3-4 comprehensive sentences covering):
-               - Operating costs and financial stability
-               - Specific tariff rates and their impact on product costs
-               - Currency exchange or inflation concerns if applicable
-               - Overall economic conditions affecting the supplier
-            3. List of specific risk factors with details (or "minimal risks" if applicable)
-            
-            CRITICAL FORMATTING REQUIREMENTS:
-            - Each section must be clearly separated with proper spacing
-            - Include specific numbers and percentages where available
-            - Use complete, grammatically correct sentences
-            - Avoid concatenating text or removing spaces
-            - Format currency values clearly (e.g., USD, EUR, etc.)
-            
-            IMPORTANT:
-            - Be specific about tariff rates if mentioned (e.g., "15% tariffs on specialty coffee beans")
-            - Note inflation trends with percentages and their impact
-            - Identify currency or exchange rate concerns with specific currencies
-            - Mention any trade restrictions or sanctions with details
-            - Consider cost stability and predictability with actual figures
-            - Provide context about how these factors affect the supplier's business
-            
-            Format your response exactly as follows (ensure proper spacing between lines):
-            FINANCIAL_SCORE: [number between 0-100, where higher is better]
-            FINANCIAL_DETAILS: [comprehensive 3-4 sentence summary with specific details about operating costs, tariffs, inflation, currency risks, and economic conditions]
-            RISK_FACTORS: [comma-separated list of specific risks with details, or "minimal risks"]
+            Response format:
+            FINANCIAL_SCORE: [number]
+            FINANCIAL_DETAILS: [summary]
+            RISK_FACTORS: [list or "minimal risks"]
             """
 
             ctx.logger.info(
