@@ -80,7 +80,7 @@ class FinancialRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=120)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=300)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings

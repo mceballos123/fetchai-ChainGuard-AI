@@ -382,61 +382,85 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
     financial_passed = financial_response.get("financial_score", 0) >= 70
     overall_approved = compliance_passed and financial_passed
 
-    # Build combined response message
-    if overall_approved:
-        approval_status = "APPROVED FOR PARTNERSHIP"
-        status_line = f"Status: APPROVED - {compliance_response.get('supplier_name')} meets both compliance and financial requirements"
+    # Build dynamic supplier requirements status
+    if compliance_passed and financial_passed:
+        requirements_text = "Supplier meets both compliance and financial requirements"
+    elif compliance_passed and not financial_passed:
+        requirements_text = "Supplier meets compliance requirements but does not meet financial requirements"
+    elif not compliance_passed and financial_passed:
+        requirements_text = "Supplier meets financial requirements but does not meet compliance requirements"
     else:
-        approval_status = " NOT APPROVED"
-        reasons = []
-        if not compliance_passed:
-            reasons.append("compliance score below threshold (75)")
-        if not financial_passed:
-            reasons.append("financial risk too high (score below 70)")
-        status_line = f"Status: NOT APPROVED - {', '.join(reasons)}"
+        requirements_text = (
+            "Supplier does not meet compliance or financial requirements"
+        )
+
+    # Build dynamic recommendation summary
+    if overall_approved:
+        approval_header = "APPROVED FOR PARTNERSHIP"
+        recommendation_summary = f"Based on the analysis, this supplier demonstrates strong alignment with your business values and meets all required thresholds for partnership consideration."
+    else:
+        approval_header = "NOT APPROVED FOR PARTNERSHIP"
+        if not compliance_passed and not financial_passed:
+            recommendation_summary = "This supplier requires significant improvements in both compliance practices and financial stability before being considered for partnership."
+        elif not compliance_passed:
+            recommendation_summary = "While the financial profile is acceptable, compliance concerns must be addressed before moving forward with this partnership."
+        else:
+            recommendation_summary = "The compliance profile is strong, but financial risks need to be mitigated to proceed with partnership."
+
+    # Format financial details cleanly without bullet points
+    financial_details = financial_response.get("financial_details", "N/A")
+
+    # Format risk factors - include even small ones without being nice
+    risk_factors = financial_response.get("risk_factors", [])
+    if risk_factors:
+        risk_factors_text = "\n".join([f"  • {factor}" for factor in risk_factors])
+    else:
+        risk_factors_text = "  • No significant financial risks identified"
+
+    # Format violations - include even if minimal
+    violations = compliance_response.get("violations", [])
+    violations_count = len(violations)
+    if violations:
+        violations_text = "\n".join([f"  • {v}" for v in violations])
+    else:
+        violations_text = "  • None identified"
 
     response_text = f"""
-{approval_status}
+{approval_header}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- SUPPLIER ANALYSIS REPORT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SUPPLIER ANALYSIS REPORT
 
-Supplier: {compliance_response.get('supplier_name')}
-{status_line}
+Business Owner: {compliance_response.get('supplier_name', 'N/A')}
+Supplier Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Supplier Requirements: {requirements_text}
+
 COMPLIANCE ANALYSIS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Overall Compliance Score: {compliance_response.get('compliance_score')}/100 
+Overall Compliance Score: {compliance_response.get('compliance_score')}/100
 
 Ethics & Worker Treatment:
-  • {compliance_response.get('ethics_info') or 'N/A'}
+{compliance_response.get('ethics_info', 'N/A')}
 
 Sustainability Practices:
-  • {compliance_response.get('sustainability_info') or 'N/A'}
+{compliance_response.get('sustainability_info', 'N/A')}
 
-Violations Found: {len(compliance_response.get('violations', []))}
-{chr(10).join([f"  • {v}" for v in compliance_response.get('violations', [])]) if compliance_response.get('violations') else "  • None"}
+Violations Found: {violations_count}
+{violations_text}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FINANCIAL RISK ANALYSIS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Financial Risk Score: {financial_response.get('financial_score')}/100
-(Higher score = Lower financial risk)
-Financial Details:
-  • {financial_response.get('financial_details') or 'N/A'}
+Financial Risk Score: {financial_response.get('financial_score')}/100 (Higher = Lower Risk)
 
-Risk Factors: {len(financial_response.get('risk_factors', []))}
-{chr(10).join([f"  • {r}" for r in financial_response.get('risk_factors', [])]) if financial_response.get('risk_factors') else "  • Minimal risks identified"}
+Operating & Cost Assessment:
+{financial_details}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- RECOMMENDATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Risk Factors Identified: {len(risk_factors)}
+{risk_factors_text}
 
-{f" RECOMMENDED: {compliance_response.get('supplier_name')} is approved for partnership based on strong compliance practices and acceptable financial risk profile." if overall_approved else f" NOT RECOMMENDED: {compliance_response.get('supplier_name')} does not meet the minimum requirements for partnership. {'Consider alternative suppliers.' if not compliance_passed and not financial_passed else 'Review the failing criteria before proceeding.'}"}
+RECOMMENDATION
+
+{recommendation_summary}
     """
 
     # Send combined response back to user via chat
@@ -465,12 +489,8 @@ Risk Factors: {len(financial_response.get('risk_factors', []))}
     ctx.logger.info(
         f"   Overall Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}"
     )
-    ctx.logger.info(
-        f"Compliance: {compliance_response.get('compliance_score')}/100 "
-    )
-    ctx.logger.info(
-        f"   Financial: {financial_response.get('financial_score')}/100"
-    )
+    ctx.logger.info(f"Compliance: {compliance_response.get('compliance_score')}/100 ")
+    ctx.logger.info(f"   Financial: {financial_response.get('financial_score')}/100")
 
     # Clean up session and pending responses
     active_sessions = ctx.storage.get("active_sessions") or {}
