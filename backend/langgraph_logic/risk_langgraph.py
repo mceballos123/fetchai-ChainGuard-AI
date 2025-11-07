@@ -329,25 +329,36 @@ class RiskRAGSystem:
             risk_query = f"""
             RISK MANAGEMENT ANALYSIS: {supplier_name} ({industry})
             
-            Score 0-100 (higher=lower risk): 75+ low risks | 60-74 moderate | 40-59 significant | <40 high
+            Score 0-100 (higher score = lower risk, better supplier):
+            - 85-100: Excellent risk management, minimal vulnerabilities
+            - 70-84: Good risk management, acceptable with minor considerations (APPROVED)
+            - 60-69: Moderate risk, requires careful evaluation (NEEDS REVIEW)
+            - 50-59: Significant risks requiring mitigation plans
+            - Below 50: High risk, major concerns present
             
-            Evaluate:
-            - Capacity constraints
-            - Natural disaster risks
-            - Logistics accessibility
-            - Supply chain vulnerabilities
-            - Operational risks
-            - Market position risks
+            SCORING GUIDANCE:
+            - Start with a baseline of 75 points for standard operations
+            - Add points (+5-15) for: strong infrastructure, disaster preparedness, diversified supply chains, excellent logistics
+            - Deduct points (-5-15) for: capacity issues, high disaster exposure, poor logistics, supply chain concentration
+            - Be realistic: most functional suppliers should score 70-85
+            - Approval threshold is 70 points - suppliers scoring 70+ are acceptable
+            - Only score below 50 if there are serious, documented concerns that could impact the supplier's ability to fulfill the order or the supplier's reputation.
             
-            Provide:
-            1. Risk score (0-100)
-            2. Risk summary (2-3 sentences): capacity, disasters, logistics, supply chain
-            3. Risk factors list or "minimal risks identified"
+            Evaluate these risk factors:
+            - Capacity constraints (can they handle demand?)
+            - Natural disaster exposure (location vulnerabilities including weather event that could impact the supplier)
+            - Logistics and accessibility (transportation, infrastructure)
+            - Supply chain dependencies (single points of failure?)
+            
+            Provide a balanced assessment:
+            1. Risk score (0-100) - Be fair and realistic
+            2. Risk summary (2-3 sentences): highlight both strengths and concerns
+            3. Risk factors: list specific concerns, or "minimal risks identified" even if the supplier is approved.
             
             Response format:
             RISK_SCORE: [number]
-            RISK_DETAILS: [summary]
-            RISK_FACTORS: [list or "minimal risks identified"]
+            RISK_DETAILS: [balanced 2-3 sentence summary]
+            RISK_FACTORS: [specific issues or "minimal risks identified even if the supplier is approved"]
             """
 
             ctx.logger.info("Executing risk management query...")
@@ -376,12 +387,12 @@ class RiskRAGSystem:
         """Parse LLM response and extract structured risk data"""
         try:
             ctx.logger.info("Parsing risk scores from LLM response...")
-            ctx.logger.info("=" * 70)
+            ctx.logger.info("=" * 50)
             ctx.logger.info("RAW LLM RESPONSE:")
             ctx.logger.info(response_text)
-            ctx.logger.info("=" * 70)
+            ctx.logger.info("=" * 50)
 
-            # Initialize defaults
+            # Initialize defaults (using 70 as neutral baseline instead of 50)
             risk_score = 50.0
             risk_details = "Insufficient risk data"
             risk_factors = []
@@ -467,7 +478,7 @@ class RiskRAGSystem:
     def _generate_fallback_response(self, supplier_name: str) -> Dict[str, Any]:
         """Generate fallback response when RAG is unavailable"""
         return {
-            "risk_score": 50.0,
+            "risk_score": 70.0,  # Neutral baseline score
             "risk_details": f"Unable to retrieve detailed risk information for {supplier_name}",
             "risk_factors": ["Data retrieval unavailable"],
             "retrieved_context": "Fallback mode - RAG system unavailable",
@@ -596,8 +607,8 @@ def risk_router(
     Node 2: Conditional routing based on risk score.
 
     Routes to:
-    - "success_node" if score >= 75 (APPROVED)
-    - "error_node" if score < 75 OR error occurred (REJECTED)
+    - "success_node" if score >= 70 (APPROVED)
+    - "error_node" if score < 70 OR error occurred (REJECTED)
     """
     risk_score = state.get("risk_score", 0.0)
     error_message = state.get("error_message")
@@ -607,11 +618,11 @@ def risk_router(
         return "error_node"
 
     # Check risk threshold
-    if risk_score >= 75:
+    if risk_score >= 70:
         return "success_node"
     else:
         state["error_message"] = (
-            f"Risk score {risk_score}/100 below threshold (75). Supplier rejected."
+            f"Risk score {risk_score}/100 below threshold (70). Supplier rejected."
         )
         return "error_node"
 
@@ -666,9 +677,9 @@ def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
         ↓
     risk_check_node (Run RAG analysis)
         ↓
-    risk_router (Check score >= 75)
-        ├─→ success_node (Score >= 75) → END
-        └─→ error_node (Score < 75 or error) → END
+    risk_router (Check score >= 70)
+        ├─→ success_node (Score >= 70) → END
+        └─→ error_node (Score < 70 or error) → END
 
     Returns:
         Compiled StateGraph workflow
