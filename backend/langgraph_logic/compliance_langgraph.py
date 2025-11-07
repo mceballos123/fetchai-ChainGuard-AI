@@ -63,7 +63,7 @@ def _resolve_compliance_path() -> Path:
 
 
 COMPLIANCE_FILES_DIR = _resolve_compliance_path()
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME") # gets the pinecone index name
 EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
 print(f"Resolved compliance path: {COMPLIANCE_FILES_DIR}")
 print(f"Path exists: {COMPLIANCE_FILES_DIR.exists()}")

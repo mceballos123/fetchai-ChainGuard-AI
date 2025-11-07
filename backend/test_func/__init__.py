@@ -23,6 +23,8 @@ from .compliance_helpers import (
     log_response_transmission,
     validate_response_before_sending,
     validate_financial_response_before_sending,
+    validate_risk_response_before_sending,
+    verify_risk_connection,
 )
 
 __all__ = [
@@ -38,4 +40,6 @@ __all__ = [
     "log_response_transmission",
     "validate_response_before_sending",
     "validate_financial_response_before_sending",
+    "validate_risk_response_before_sending",
+    "verify_risk_connection",
 ]

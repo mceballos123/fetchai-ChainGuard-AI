@@ -53,9 +53,10 @@ class SupplierWorkflowState(TypedDict):
     financial_score: Optional[float]  # 0-100, higher = lower risk (better)
     financial_info: Optional[str]  # Summary: tariffs, inflation, economic risks
 
-    # Risk agent results (future)
-    risk_score: Optional[float]
-    risk_info: Optional[str]
+    # Risk management agent results - RAG from risk_management_files/
+    risk_score: Optional[float]  # 0-100, higher = better (lower risk)
+    risk_details: Optional[str]  # Summary: capacity, disasters, logistics
+    risk_factors: Optional[List[str]]  # List of identified risk factors
 
     # Workflow control
     current_step: str  # Track which node we're in
