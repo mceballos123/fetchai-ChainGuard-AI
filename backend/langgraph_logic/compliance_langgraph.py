@@ -63,7 +63,7 @@ def _resolve_compliance_path() -> Path:
 
 
 COMPLIANCE_FILES_DIR = _resolve_compliance_path()
-PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME") # gets the pinecone index name
+PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")  # gets the pinecone index name
 EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
 print(f"Resolved compliance path: {COMPLIANCE_FILES_DIR}")
 print(f"Path exists: {COMPLIANCE_FILES_DIR.exists()}")
@@ -367,8 +367,41 @@ class ComplianceRAGSystem:
             return False
 
     async def _index_documents(self, ctx: Context) -> bool:
-        """Index compliance documents in Pinecone"""
+        """Index compliance documents in Pinecone (only if not already indexed)"""
         try:
+            if not self.index:
+                ctx.logger.warning("Index not initialized, skipping document indexing")
+                return False
+
+            # Check if documents are already indexed in Pinecone
+            try:
+                # Get the Pinecone index stats to check if it has vectors
+                from pinecone import Pinecone
+
+                pinecone_api_key = os.getenv("PINECONE_API_KEY")
+                pc = Pinecone(api_key=pinecone_api_key)
+                pinecone_index = pc.Index(PINECONE_INDEX_NAME)
+                stats = pinecone_index.describe_index_stats()
+
+                total_vectors = stats.get("total_vector_count", 0)
+
+                if total_vectors > 0:
+                    ctx.logger.info(
+                        f"✓ Pinecone compliance index already contains {total_vectors} vectors"
+                    )
+                    ctx.logger.info(
+                        "✓ Skipping document indexing (compliance documents already in vector DB)"
+                    )
+                    return True
+                else:
+                    ctx.logger.info(
+                        "Pinecone compliance index is empty, proceeding with document indexing..."
+                    )
+            except Exception as e:
+                ctx.logger.warning(
+                    f"Could not check compliance index stats: {e}, proceeding with indexing..."
+                )
+
             # Parse documents into nodes (chunks)
             parser = SimpleNodeParser.from_defaults(
                 chunk_size=512,
@@ -383,18 +416,13 @@ class ComplianceRAGSystem:
             ctx.logger.info(f"Created {len(nodes)} document chunks")
 
             # Index nodes in Pinecone
-            if self.index:
-                # Add nodes to index (this will embed and store in Pinecone)
-                for node in nodes:
-                    try:
-                        self.index.insert_nodes([node])
-                    except Exception as e:
-                        ctx.logger.warning(f"Error indexing node: {e}")
+            for node in nodes:
+                try:
+                    self.index.insert_nodes([node])
+                except Exception as e:
+                    ctx.logger.warning(f"Error indexing node: {e}")
 
-                ctx.logger.info("Documents indexed in Pinecone")
-            else:
-                ctx.logger.warning("Index not initialized, skipping document indexing")
-
+            ctx.logger.info("✓ Compliance documents indexed in Pinecone")
             return True
 
         except Exception as e:

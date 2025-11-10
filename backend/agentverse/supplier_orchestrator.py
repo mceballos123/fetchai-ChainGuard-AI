@@ -48,7 +48,7 @@ FINANCIAL_AGENT_ADDRESS = os.getenv(
 RISK_AGENT_ADDRESS = os.getenv(
     "RISK_AGENT_ADDRESS",
 )
-
+#/Users/mceballos456/fetchai-ChainGuard-AI/backend/agentverse/supplier_orchestrator.py
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
 

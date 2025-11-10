@@ -305,8 +305,34 @@ class FinancialRAGSystem:
             return False
 
     async def _index_documents(self, ctx: Context) -> bool:
-        """Index financial documents in Pinecone"""
+        """Index financial documents in Pinecone (only if not already indexed)"""
         try:
+            if not self.index:
+                ctx.logger.warning(
+                    "Index not initialized, skipping financial document indexing"
+                )
+                return False
+
+            # Check if documents are already indexed in Pinecone
+            try:
+                # Get the Pinecone index stats to check if it has vectors
+                from pinecone import Pinecone
+                pinecone_api_key = os.getenv("PINECONE_API_KEY")
+                pc = Pinecone(api_key=pinecone_api_key)
+                pinecone_index = pc.Index(PINECONE_INDEX_NAME_FINANCIAL)
+                stats = pinecone_index.describe_index_stats()
+                
+                total_vectors = stats.get('total_vector_count', 0)
+                
+                if total_vectors > 0:
+                    ctx.logger.info(f"✓ Pinecone financial index already contains {total_vectors} vectors")
+                    ctx.logger.info("✓ Skipping document indexing (financial documents already in vector DB)")
+                    return True
+                else:
+                    ctx.logger.info("Pinecone financial index is empty, proceeding with document indexing...")
+            except Exception as e:
+                ctx.logger.warning(f"Could not check financial index stats: {e}, proceeding with indexing...")
+
             # Parse documents into nodes (chunks)
             parser = SimpleNodeParser.from_defaults(
                 chunk_size=512,
@@ -321,20 +347,13 @@ class FinancialRAGSystem:
             ctx.logger.info(f"Created {len(nodes)} financial document chunks")
 
             # Index nodes in Pinecone
-            if self.index:
-                # Add nodes to index (this will embed and store in Pinecone)
-                for node in nodes:
-                    try:
-                        self.index.insert_nodes([node])
-                    except Exception as e:
-                        ctx.logger.warning(f"Error indexing financial node: {e}")
+            for node in nodes:
+                try:
+                    self.index.insert_nodes([node])
+                except Exception as e:
+                    ctx.logger.warning(f"Error indexing financial node: {e}")
 
-                ctx.logger.info("Financial documents indexed in Pinecone")
-            else:
-                ctx.logger.warning(
-                    "Index not initialized, skipping financial document indexing"
-                )
-
+            ctx.logger.info("✓ Financial documents indexed in Pinecone")
             return True
 
         except Exception as e:

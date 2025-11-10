@@ -290,7 +290,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
 
         await ctx.send(sender, error_response)
 
-
+#/Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/compliance_agent.py
 compliance_agent.include(compliance_protocol, publish_manifest=True)
 
 if __name__ == "__main__":
