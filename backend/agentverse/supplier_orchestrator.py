@@ -14,10 +14,11 @@ from uagents_core.contrib.protocols.chat import (
     chat_protocol_spec,
 )
 
-# Import compliance, financial, and risk models
+# Import compliance, financial, risk, and performance models
 from backend.models.compliance import ComplianceRequest, ComplianceResponse
 from backend.models.financial import FinancialRequest, FinancialResponse
 from backend.models.risk import RiskRequest, RiskResponse
+from backend.models.performance import PerformanceRequest, PerformanceResponse
 
 # Import test utilities
 from backend.test_func import (
@@ -48,6 +49,9 @@ FINANCIAL_AGENT_ADDRESS = os.getenv(
 RISK_AGENT_ADDRESS = os.getenv(
     "RISK_AGENT_ADDRESS",
 )
+PERFORMANCE_AGENT_ADDRESS = os.getenv(
+    "PERFORMANCE_AGENT_ADDRESS",
+)
 #/Users/mceballos456/fetchai-ChainGuard-AI/backend/agentverse/supplier_orchestrator.py
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
@@ -62,8 +66,10 @@ async def startup(ctx: Context):
     ctx.logger.info(f"Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
     ctx.logger.info(f"Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
     ctx.logger.info(f"Risk Agent: {RISK_AGENT_ADDRESS}")
+    ctx.logger.info(f"Performance Agent: {PERFORMANCE_AGENT_ADDRESS}")
 
     ctx.storage.set("active_sessions", {})
+    ctx.storage.set("approved_suppliers", [])
 
     # Storage for tracking responses from both agents
     ctx.storage.set("pending_responses", {})
@@ -136,14 +142,78 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     ctx.logger.info(f"User Query: {user_query}")
 
-    # Step 3: Store session information
+    # Step 3: Determine if this is a monitoring request or find supplier request
+    user_query_lower = user_query.lower()
+    monitoring_keywords = ["monitor", "update", "status", "check on", "check up", "how is", "report on"]
+    is_monitoring_request = any(keyword in user_query_lower for keyword in monitoring_keywords)
+
+    # Step 4: Store session information
     msg_id = str(msg.msg_id)
     active_sessions = ctx.storage.get("active_sessions") or {}
-    active_sessions[msg_id] = {"sender": sender, "query": user_query}
+    active_sessions[msg_id] = {"sender": sender, "query": user_query, "mode": "monitor" if is_monitoring_request else "find"}
     ctx.storage.set("active_sessions", active_sessions)
     ctx.logger.info(f"Session stored with ID: {msg_id}")
+    ctx.logger.info(f"Mode detected: {'MONITORING' if is_monitoring_request else 'FIND SUPPLIER'}")
 
-    # Step 4: Forward to ALL THREE Agents (Compliance, Financial, Risk)
+    # Step 5: Route based on mode
+    if is_monitoring_request:
+        # MONITORING MODE: Forward to Performance Agent only
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("MONITORING MODE - FORWARDING TO PERFORMANCE AGENT")
+        ctx.logger.info("=" * 70)
+
+        # Initialize pending responses for monitoring
+        pending_responses = ctx.storage.get("pending_responses") or {}
+        pending_responses[msg_id] = {
+            "performance_response": None,
+            "sender": sender,
+            "user_query": user_query,
+            "mode": "monitor",
+        }
+        ctx.storage.set("pending_responses", pending_responses)
+
+        try:
+            # Send to Performance Agent
+            ctx.logger.info(f"Sending to Performance Agent: {PERFORMANCE_AGENT_ADDRESS}")
+            performance_request = PerformanceRequest(
+                request_id=msg_id,
+                supplier_name=user_query,
+                timestamp="",
+            )
+
+            await ctx.send(PERFORMANCE_AGENT_ADDRESS, performance_request)
+
+            ctx.logger.info(f"✓ PerformanceRequest sent to Performance Agent")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info("WAITING FOR PERFORMANCE RESPONSE...")
+            ctx.logger.info("=" * 70)
+
+        except Exception as e:
+            ctx.logger.error(f"Error sending to performance agent: {e}")
+
+            # Clean up pending responses
+            pending_responses.pop(msg_id, None)
+            ctx.storage.set("pending_responses", pending_responses)
+
+            # Send error response to user
+            error_response = ChatMessage(
+                timestamp="",
+                msg_id=uuid4(),
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"Error forwarding monitoring request: {str(e)}",
+                    )
+                ],
+            )
+            await ctx.send(sender, error_response)
+            log_message_transmission(
+                ctx, "SENT", "ChatMessage", str(error_response.msg_id), {"type": "error"}
+            )
+
+        return
+
+    # Step 6: FIND SUPPLIER MODE - Forward to ALL THREE Agents (Compliance, Financial, Risk)
     ctx.logger.info("=" * 70)
     ctx.logger.info("FORWARDING TO ALL THREE AGENTS")
     ctx.logger.info("=" * 70)
@@ -333,6 +403,9 @@ financial_protocol = Protocol(name="financial_response_protocol", version="1.0")
 # Add Risk Response Protocol
 risk_protocol = Protocol(name="risk_response_protocol", version="1.0")
 
+# Add Performance Response Protocol
+performance_protocol = Protocol(name="performance_response_protocol", version="1.0")
+
 
 @financial_protocol.on_message(model=FinancialResponse)
 async def handle_financial_response(ctx: Context, sender: str, msg: FinancialResponse):
@@ -421,6 +494,146 @@ async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
 
     except Exception as e:
         ctx.logger.error(f"Error handling risk response: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
+@performance_protocol.on_message(model=PerformanceResponse)
+async def handle_performance_response(ctx: Context, sender: str, msg: PerformanceResponse):
+    """Handle performance monitoring response and send to user"""
+    ctx.logger.info("=" * 60)
+    ctx.logger.info("✓ Received Performance Monitoring Response")
+    ctx.logger.info("=" * 60)
+
+    # Verify message received from Performance Agent
+    log_message_transmission(
+        ctx,
+        "RECEIVED",
+        "PerformanceResponse",
+        msg.request_id,
+        {
+            "supplier_name": msg.supplier_name,
+            "overall_risk_level": msg.overall_risk_level,
+        },
+    )
+
+    try:
+        # Get pending response data
+        pending_responses = ctx.storage.get("pending_responses") or {}
+
+        if msg.request_id not in pending_responses:
+            ctx.logger.warning(
+                f"No pending response tracking for request {msg.request_id}"
+            )
+            return
+
+        response_data = pending_responses[msg.request_id]
+        user_sender = response_data.get("sender")
+
+        if not user_sender:
+            ctx.logger.error(f"No sender found for request {msg.request_id}")
+            return
+
+        ctx.logger.info(f"✓ Performance response received")
+        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"   Overall Risk: {msg.overall_risk_level}")
+        ctx.logger.info(f"   Alerts: {len(msg.alerts)}")
+
+        # Build monitoring report
+        alerts_text = ""
+        if msg.alerts:
+            alerts_text = "\n".join([f"  ⚠️ {alert}" for alert in msg.alerts])
+        else:
+            alerts_text = "  ✓ No active alerts"
+
+        # Determine status icon based on overall risk
+        risk_icon = {
+            "LOW": "🟢",
+            "MEDIUM": "🟡",
+            "HIGH": "🟠",
+            "CRITICAL": "🔴",
+            "UNKNOWN": "⚪"
+        }.get(msg.overall_risk_level, "⚪")
+
+        response_text = f"""
+SUPPLIER MONITORING UPDATE
+
+Supplier: {msg.supplier_name}
+Overall Risk Level: {risk_icon} {msg.overall_risk_level}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌤️  WEATHER CONDITIONS
+Status: {msg.weather_status}
+{msg.weather_details}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👷 LABOR & STRIKES
+Status: {msg.strike_status}
+{msg.strike_details}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🏛️  POLITICAL ENVIRONMENT
+Status: {msg.political_status}
+{msg.political_details}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚖️  LEGAL & REGULATORY
+Status: {msg.legal_status}
+{msg.legal_details}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚨 ACTIVE ALERTS ({len(msg.alerts)})
+{alerts_text}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+This monitoring update helps you stay informed about external factors that may impact your supplier's operations. Request another update anytime to see the latest conditions.
+        """
+
+        # Send monitoring response back to user
+        ctx.logger.info(f"Sending monitoring update to user: {user_sender}")
+
+        response = ChatMessage(
+            timestamp="",
+            msg_id=uuid4(),
+            content=[
+                TextContent(type="text", text=response_text.strip()),
+                EndSessionContent(type="end-session"),
+            ],
+        )
+
+        await ctx.send(user_sender, response)
+
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "ChatMessage",
+            str(response.msg_id),
+            {"type": "monitoring_update", "risk_level": msg.overall_risk_level},
+        )
+
+        ctx.logger.info(f"✓ Monitoring update sent to user")
+        ctx.logger.info(f"   Risk Level: {msg.overall_risk_level}")
+
+        # Clean up session and pending responses
+        active_sessions = ctx.storage.get("active_sessions") or {}
+        active_sessions.pop(msg.request_id, None)
+        ctx.storage.set("active_sessions", active_sessions)
+
+        pending_responses.pop(msg.request_id, None)
+        ctx.storage.set("pending_responses", pending_responses)
+
+        ctx.logger.info(f"✓ Session cleaned up for request {msg.request_id}")
+        ctx.logger.info("=" * 70)
+
+    except Exception as e:
+        ctx.logger.error(f"Error handling performance response: {e}")
         import traceback
 
         traceback.print_exc()
@@ -642,6 +855,7 @@ supplier_orchestrator.include(chat_proto, publish_manifest=True)
 supplier_orchestrator.include(compliance_protocol, publish_manifest=True)
 supplier_orchestrator.include(financial_protocol, publish_manifest=True)
 supplier_orchestrator.include(risk_protocol, publish_manifest=True)
+supplier_orchestrator.include(performance_protocol, publish_manifest=True)
 
 if __name__ == "__main__":
     supplier_orchestrator.run()
