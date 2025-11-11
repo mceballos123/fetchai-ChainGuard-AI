@@ -73,7 +73,7 @@ class FinancialRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=300)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=600)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings
@@ -605,7 +605,7 @@ class FinancialRAGSystem:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(run_async)
-                    result = future.result(timeout=300)  # 5 minute timeout
+                    result = future.result(timeout=600)  # 10 minute timeout
                     return result
             except RuntimeError:
                 # No event loop running, use asyncio.run()
@@ -683,12 +683,12 @@ def financial_router(
     if error_message:
         return "error_node"
 
-    # Check financial threshold (70+ means lower risk, acceptable)
-    if financial_score >= 70:
+    # Check financial threshold (60+ means acceptable financial health)
+    if financial_score >= 60:
         return "success_node"
     else:
         state["error_message"] = (
-            f"Financial score {financial_score}/100 below threshold (70). Financial risk too high."
+            f"Financial score {financial_score}/100 below threshold (60). Financial risk too high."
         )
         return "error_node"
 

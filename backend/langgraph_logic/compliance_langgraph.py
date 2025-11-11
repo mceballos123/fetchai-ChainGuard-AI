@@ -72,7 +72,7 @@ class ComplianceRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=300)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=600)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings
@@ -831,7 +831,7 @@ class ComplianceRAGSystem:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(run_async)
-                    result = future.result(timeout=300)  # 5 minute timeout
+                    result = future.result(timeout=600)  # 10 minute timeout
                     return result
             except RuntimeError:
                 # No event loop running, use asyncio.run()
@@ -914,12 +914,12 @@ def compliance_router(
     if error_message:
         return "error_node"
 
-    # Check compliance threshold
-    if compliance_score >= 75:
+    # Check compliance threshold (60+ means acceptable compliance)
+    if compliance_score >= 60:
         return "success_node"
     else:
         state["error_message"] = (
-            f"Compliance score {compliance_score}/100 below threshold (75). Supplier rejected."
+            f"Compliance score {compliance_score}/100 below threshold (60). Supplier rejected."
         )
         return "error_node"
 

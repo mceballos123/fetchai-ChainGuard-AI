@@ -52,7 +52,7 @@ RISK_AGENT_ADDRESS = os.getenv(
 PERFORMANCE_AGENT_ADDRESS = os.getenv(
     "PERFORMANCE_AGENT_ADDRESS",
 )
-#/Users/mceballos456/fetchai-ChainGuard-AI/backend/agentverse/supplier_orchestrator.py
+
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
 
@@ -70,6 +70,9 @@ async def startup(ctx: Context):
 
     ctx.storage.set("active_sessions", {})
     ctx.storage.set("approved_suppliers", [])
+    ctx.storage.set(
+        "selected_supplier", None
+    )  # Track the supplier selected for monitoring
 
     # Storage for tracking responses from both agents
     ctx.storage.set("pending_responses", {})
@@ -144,16 +147,32 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     # Step 3: Determine if this is a monitoring request or find supplier request
     user_query_lower = user_query.lower()
-    monitoring_keywords = ["monitor", "update", "status", "check on", "check up", "how is", "report on"]
-    is_monitoring_request = any(keyword in user_query_lower for keyword in monitoring_keywords)
+    monitoring_keywords = [
+        "monitor",
+        "update",
+        "status",
+        "check on",
+        "check up",
+        "how is",
+        "report on",
+    ]
+    is_monitoring_request = any(
+        keyword in user_query_lower for keyword in monitoring_keywords
+    )
 
     # Step 4: Store session information
     msg_id = str(msg.msg_id)
     active_sessions = ctx.storage.get("active_sessions") or {}
-    active_sessions[msg_id] = {"sender": sender, "query": user_query, "mode": "monitor" if is_monitoring_request else "find"}
+    active_sessions[msg_id] = {
+        "sender": sender,
+        "query": user_query,
+        "mode": "monitor" if is_monitoring_request else "find",
+    }
     ctx.storage.set("active_sessions", active_sessions)
     ctx.logger.info(f"Session stored with ID: {msg_id}")
-    ctx.logger.info(f"Mode detected: {'MONITORING' if is_monitoring_request else 'FIND SUPPLIER'}")
+    ctx.logger.info(
+        f"Mode detected: {'MONITORING' if is_monitoring_request else 'FIND SUPPLIER'}"
+    )
 
     # Step 5: Route based on mode
     if is_monitoring_request:
@@ -161,6 +180,31 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         ctx.logger.info("=" * 70)
         ctx.logger.info("MONITORING MODE - FORWARDING TO PERFORMANCE AGENT")
         ctx.logger.info("=" * 70)
+
+        # Get the selected supplier (from the find_supplier phase)
+        selected_supplier = ctx.storage.get("selected_supplier")
+
+        if not selected_supplier:
+            ctx.logger.warning("No selected supplier available for monitoring")
+            error_response = ChatMessage(
+                timestamp="",
+                msg_id=uuid4(),
+                content=[
+                    TextContent(
+                        type="text",
+                        text="Error: No supplier selected for monitoring. Please run the find_supplier feature first to select a supplier.",
+                    )
+                ],
+            )
+            await ctx.send(sender, error_response)
+            log_message_transmission(
+                ctx,
+                "SENT",
+                "ChatMessage",
+                str(error_response.msg_id),
+                {"type": "error"},
+            )
+            return
 
         # Initialize pending responses for monitoring
         pending_responses = ctx.storage.get("pending_responses") or {}
@@ -173,11 +217,14 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         ctx.storage.set("pending_responses", pending_responses)
 
         try:
-            # Send to Performance Agent
-            ctx.logger.info(f"Sending to Performance Agent: {PERFORMANCE_AGENT_ADDRESS}")
+            # Send to Performance Agent with the selected supplier
+            ctx.logger.info(
+                f"Sending to Performance Agent: {PERFORMANCE_AGENT_ADDRESS}"
+            )
+            ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
             performance_request = PerformanceRequest(
                 request_id=msg_id,
-                supplier_name=user_query,
+                supplier_name=selected_supplier,
                 timestamp="",
             )
 
@@ -208,7 +255,11 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             )
             await ctx.send(sender, error_response)
             log_message_transmission(
-                ctx, "SENT", "ChatMessage", str(error_response.msg_id), {"type": "error"}
+                ctx,
+                "SENT",
+                "ChatMessage",
+                str(error_response.msg_id),
+                {"type": "error"},
             )
 
         return
@@ -228,6 +279,9 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         "user_query": user_query,
     }
     ctx.storage.set("pending_responses", pending_responses)
+
+    # Store the user query as the supplier being evaluated (will be updated once selected)
+    ctx.storage.set("current_evaluation_supplier", user_query)
 
     try:
         # Send to Compliance Agent
@@ -500,7 +554,9 @@ async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
 
 
 @performance_protocol.on_message(model=PerformanceResponse)
-async def handle_performance_response(ctx: Context, sender: str, msg: PerformanceResponse):
+async def handle_performance_response(
+    ctx: Context, sender: str, msg: PerformanceResponse
+):
     """Handle performance monitoring response and send to user"""
     ctx.logger.info("=" * 60)
     ctx.logger.info("Received Performance Monitoring Response")
@@ -650,7 +706,9 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
         or risk_response is None
     ):
         ctx.logger.info(f"Still waiting for responses...")
-        ctx.logger.info(f"Compliance: {'RECEIVED' if compliance_response else 'PENDING'}")
+        ctx.logger.info(
+            f"Compliance: {'RECEIVED' if compliance_response else 'PENDING'}"
+        )
         ctx.logger.info(f"Financial: {'RECEIVED' if financial_response else 'PENDING'}")
         ctx.logger.info(f"Risk: {'RECEIVED' if risk_response else 'PENDING'}")
         return
@@ -695,6 +753,13 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
     if overall_approved:
         requirements_text = (
             f"Supplier meets all requirements: {', '.join(passed_requirements)}"
+        )
+        # Store the approved supplier for monitoring
+        ctx.storage.set(
+            "selected_supplier", compliance_response.get("supplier_name", "")
+        )
+        ctx.logger.info(
+            f"Approved supplier stored for monitoring: {compliance_response.get('supplier_name', '')}"
         )
     elif len(passed_requirements) > 0:
         requirements_text = f"Supplier meets {', '.join(passed_requirements)} but does not meet {', '.join(failed_requirements)}"

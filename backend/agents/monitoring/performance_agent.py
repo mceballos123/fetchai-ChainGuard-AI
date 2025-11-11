@@ -1,9 +1,11 @@
 from uagents import Agent, Context, Protocol
 import os
 import json
-
+from typing import Dict, Any, Optional
+#/Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/monitoring/performance_agent.py
 # Import models
 from backend.models.performance import PerformanceRequest, PerformanceResponse
+from backend.prompts.performance_prompt import PROMPT
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -17,10 +19,146 @@ performance_agent = Agent(
 
 performance_protocol = Protocol(name="performance_protocol", version="1.0")
 
-# Load mock monitoring data
-MONITORING_DATA_PATH = os.path.join(
-    os.path.dirname(__file__), "../../data/supplier_monitoring_data.json"
+# Paths to supplier data files
+COMPLIANCE_FILES_PATH = os.path.join(
+    os.path.dirname(__file__), "../../compliance_files"
 )
+FINANCIAL_FILES_PATH = os.path.join(os.path.dirname(__file__), "../../financial_files")
+RISK_MANAGEMENT_FILES_PATH = os.path.join(
+    os.path.dirname(__file__), "../../risk_management_files"
+)
+
+
+def load_supplier_file(supplier_name: str, file_path: str) -> Optional[str]:
+    """
+    Load supplier data from a file.
+
+    Args:
+        supplier_name: The name of the supplier (converted to lowercase with underscores)
+        file_path: The directory path where the file is located
+
+    Returns:
+        The file contents as a string, or None if file not found
+    """
+    # Convert supplier name to file format (e.g., "Green Valley" -> "green_valley")
+    file_name = f"{supplier_name.lower().replace(' ', '_')}.txt"
+    full_path = os.path.join(file_path, file_name)
+
+    try:
+        if os.path.exists(full_path):
+            with open(full_path, "r") as f:
+                return f.read()
+        else:
+            return None
+    except Exception as e:
+        print(f"Error loading file {full_path}: {e}")
+        return None
+
+
+def extract_monitoring_insights(
+    compliance_data: str, risk_data: str, financial_data: str
+) -> Dict[str, Any]:
+    """
+    Extract monitoring insights from supplier files using the performance prompt guidelines.
+
+    The performance_prompt directs the agent to monitor:
+    - WEATHER conditions
+    - Strikes and labor issues
+    - Political environment
+    - New laws and regulations
+
+    Args:
+        compliance_data: Contents of compliance file
+        risk_data: Contents of risk management file
+        financial_data: Contents of financial file
+
+    Returns:
+        Dictionary with monitoring insights
+    """
+    insights = {
+        "weather_status": "NORMAL",
+        "weather_details": "",
+        "strike_status": "NO STRIKES",
+        "strike_details": "",
+        "political_status": "STABLE",
+        "political_details": "",
+        "legal_status": "COMPLIANT",
+        "legal_details": "",
+        "alerts": [],
+        "overall_risk": "LOW",
+    }
+
+    # Extract weather-related information from risk data
+    if risk_data:
+        if "flood" in risk_data.lower():
+            insights["weather_status"] = "RISK: FLOOD"
+            insights["weather_details"] = (
+                "Supplier location has flood risk history. Monitor weather alerts and seasonal conditions."
+            )
+            insights["alerts"].append("Flood risk detected in supplier location")
+        if "drought" in risk_data.lower() or "water restriction" in risk_data.lower():
+            insights["weather_status"] = "RISK: DROUGHT"
+            insights["weather_details"] = (
+                "Drought conditions or water restrictions possible. Monitor water availability and irrigation status."
+            )
+            if "RISK: FLOOD" not in insights["weather_status"]:
+                insights["alerts"].append("Drought/water restriction risk identified")
+        if (
+            "temperature" in risk_data.lower()
+            or "freeze" in risk_data.lower()
+            or "heat wave" in risk_data.lower()
+        ):
+            insights[
+                "weather_details"
+            ] += " Temperature extremes possible. Monitor seasonal forecasts."
+            insights["alerts"].append("Temperature extreme risk identified")
+
+    # Extract labor/strike information
+    if risk_data:
+        if "labor" in risk_data.lower() or "workforce" in risk_data.lower():
+            insights["strike_status"] = "MONITOR: LABOR CHANGES"
+            insights["strike_details"] = (
+                "Workforce fluctuations detected. Monitor seasonal staffing levels and labor availability."
+            )
+            insights["alerts"].append("Labor availability constraints noted")
+
+    # Extract political/regulatory information
+    if compliance_data:
+        if (
+            "certification" in compliance_data.lower()
+            or "regulation" in compliance_data.lower()
+        ):
+            insights["political_details"] = (
+                "Regulatory compliance requirements active. Monitor certification status and regulatory changes."
+            )
+            if "RISK" in compliance_data:
+                insights["alerts"].append("Regulatory monitoring required")
+
+    # Extract legal/regulatory from risk data
+    if risk_data:
+        if (
+            "permit" in risk_data.lower()
+            or "compliance" in risk_data.lower()
+            or "fsma" in risk_data.lower()
+        ):
+            insights["legal_status"] = "MONITOR: PERMITS/COMPLIANCE"
+            insights["legal_details"] = (
+                "Active permit reviews and compliance audits in progress. Monitor regulatory changes and permit renewals."
+            )
+            insights["alerts"].append("Permit and regulatory compliance review ongoing")
+
+    # Determine overall risk level based on extracted information
+    alert_count = len(insights["alerts"])
+    if alert_count == 0:
+        insights["overall_risk"] = "LOW"
+    elif alert_count <= 2:
+        insights["overall_risk"] = "MEDIUM"
+    elif alert_count <= 4:
+        insights["overall_risk"] = "HIGH"
+    else:
+        insights["overall_risk"] = "CRITICAL"
+
+    return insights
 
 
 @performance_agent.on_event("startup")
@@ -29,18 +167,9 @@ async def startup(ctx: Context):
     ctx.logger.info("Performance Monitoring Agent starting up...")
     ctx.logger.info(f"Agent address: {performance_agent.address}")
 
-    # Load monitoring data
-    try:
-        with open(MONITORING_DATA_PATH, "r") as f:
-            monitoring_data = json.load(f)
-            ctx.storage.set("monitoring_data", monitoring_data)
-            ctx.logger.info("Monitoring data loaded successfully!")
-    except Exception as e:
-        ctx.logger.error(f"Error loading monitoring data: {e}")
-        ctx.storage.set("monitoring_data", {"suppliers": {}})
-
-    # Initialize update counter for each supplier
-    ctx.storage.set("update_counters", {})
+    # Load performance prompt
+    ctx.storage.set("performance_prompt", PROMPT)
+    ctx.logger.info("Performance monitoring prompt loaded!")
 
     # Initialize request trace for debugging
     ctx.storage.set(
@@ -68,9 +197,9 @@ async def handle_performance_request(
     Handle performance monitoring request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier name
-    2. Look up monitoring data from mock database
-    3. Rotate through different updates each time
+    1. Receive supplier name from orchestrator
+    2. Load supplier data from compliance, financial, and risk files
+    3. Extract monitoring insights based on performance_prompt guidelines
     4. Return performance update to orchestrator
     """
     ctx.logger.info(f"Received PerformanceRequest from {sender}")
@@ -78,17 +207,18 @@ async def handle_performance_request(
     ctx.logger.info(f"   Supplier: {msg.supplier_name}")
 
     try:
-        # Get monitoring data
-        monitoring_data = ctx.storage.get("monitoring_data") or {"suppliers": {}}
-        suppliers = monitoring_data.get("suppliers", {})
+        # Load supplier data from files
+        ctx.logger.info(f"Loading supplier data for: {msg.supplier_name}")
 
-        # Check if supplier exists in our monitoring database
-        if msg.supplier_name not in suppliers:
-            ctx.logger.warning(
-                f"Supplier '{msg.supplier_name}' not found in monitoring database"
-            )
+        compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
+        risk_data = load_supplier_file(msg.supplier_name, RISK_MANAGEMENT_FILES_PATH)
+        financial_data = load_supplier_file(msg.supplier_name, FINANCIAL_FILES_PATH)
 
-            # Return response indicating supplier not being monitored
+        # Check if supplier files exist
+        if not compliance_data and not risk_data and not financial_data:
+            ctx.logger.warning(f"Supplier '{msg.supplier_name}' data files not found")
+
+            # Return response indicating supplier not found
             response = PerformanceResponse(
                 request_id=msg.request_id,
                 supplier_name=msg.supplier_name,
@@ -105,62 +235,34 @@ async def handle_performance_request(
                 timestamp="",
             )
         else:
-            # Get supplier monitoring data
-            supplier_data = suppliers[msg.supplier_name]
-            updates = supplier_data.get("monitoring_updates", [])
+            # Extract monitoring insights from supplier data
+            ctx.logger.info(f"Extracting monitoring insights for: {msg.supplier_name}")
+            insights = extract_monitoring_insights(
+                compliance_data or "", risk_data or "", financial_data or ""
+            )
 
-            if not updates:
-                ctx.logger.warning(
-                    f"No monitoring updates available for {msg.supplier_name}"
-                )
-                response = PerformanceResponse(
-                    request_id=msg.request_id,
-                    supplier_name=msg.supplier_name,
-                    weather_status="UNKNOWN",
-                    weather_details="No monitoring updates available",
-                    strike_status="UNKNOWN",
-                    strike_details="No data available",
-                    political_status="UNKNOWN",
-                    political_details="No data available",
-                    legal_status="UNKNOWN",
-                    legal_details="No data available",
-                    overall_risk_level="UNKNOWN",
-                    alerts=["No updates available"],
-                    timestamp="",
-                )
-            else:
-                # Get update counter for this supplier
-                update_counters = ctx.storage.get("update_counters") or {}
-                current_index = update_counters.get(msg.supplier_name, 0)
+            ctx.logger.info(f"   Weather Status: {insights['weather_status']}")
+            ctx.logger.info(f"   Strike Status: {insights['strike_status']}")
+            ctx.logger.info(f"   Political Status: {insights['political_status']}")
+            ctx.logger.info(f"   Legal Status: {insights['legal_status']}")
+            ctx.logger.info(f"   Overall Risk: {insights['overall_risk']}")
 
-                # Get the current update (rotate through available updates)
-                update = updates[current_index % len(updates)]
-
-                # Increment counter for next request
-                update_counters[msg.supplier_name] = (current_index + 1) % len(updates)
-                ctx.storage.set("update_counters", update_counters)
-
-                ctx.logger.info(
-                    f"   Location: {supplier_data.get('location', 'Unknown')}"
-                )
-                ctx.logger.info(f"   Using update #{update['update_number']}")
-
-                # Build response from update data
-                response = PerformanceResponse(
-                    request_id=msg.request_id,
-                    supplier_name=msg.supplier_name,
-                    weather_status=update["weather"]["status"],
-                    weather_details=update["weather"]["details"],
-                    strike_status=update["strikes"]["status"],
-                    strike_details=update["strikes"]["details"],
-                    political_status=update["political"]["status"],
-                    political_details=update["political"]["details"],
-                    legal_status=update["legal"]["status"],
-                    legal_details=update["legal"]["details"],
-                    overall_risk_level=update["overall_risk"],
-                    alerts=update.get("alerts", []),
-                    timestamp="",
-                )
+            # Build response from extracted insights
+            response = PerformanceResponse(
+                request_id=msg.request_id,
+                supplier_name=msg.supplier_name,
+                weather_status=insights["weather_status"],
+                weather_details=insights["weather_details"],
+                strike_status=insights["strike_status"],
+                strike_details=insights["strike_details"],
+                political_status=insights["political_status"],
+                political_details=insights["political_details"],
+                legal_status=insights["legal_status"],
+                legal_details=insights["legal_details"],
+                overall_risk_level=insights["overall_risk"],
+                alerts=insights.get("alerts", []),
+                timestamp="",
+            )
 
         ctx.logger.info("Performance monitoring analysis complete!")
         ctx.logger.info(f"Overall Risk Level: {response.overall_risk_level}")
