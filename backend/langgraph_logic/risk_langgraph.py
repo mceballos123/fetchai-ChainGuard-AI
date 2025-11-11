@@ -71,7 +71,7 @@ class RiskRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=300)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=600)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings
@@ -523,7 +523,7 @@ class RiskRAGSystem:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(run_async)
-                    result = future.result(timeout=300)
+                    result = future.result(timeout=600)  # 10 minute timeout
                     return result
             except RuntimeError:
                 # No event loop running, use asyncio.run()
@@ -603,11 +603,11 @@ def risk_router(
         return "error_node"
 
     # Check risk threshold
-    if risk_score >= 70:
+    if risk_score >= 60:
         return "success_node"
     else:
         state["error_message"] = (
-            f"Risk score {risk_score}/100 below threshold (70). Supplier rejected."
+            f"Risk score {risk_score}/100 below threshold (60). Supplier rejected."
         )
         return "error_node"
 
