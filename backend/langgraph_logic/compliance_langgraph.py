@@ -21,6 +21,7 @@ from pinecone import Pinecone, ServerlessSpec
 from llama_index.llms.ollama import Ollama
 
 from langgraph.graph import StateGraph, START, END
+from ..prompts.compliance_prompt import compliance_prompt
 
 load_dotenv()
 
@@ -474,38 +475,7 @@ class ComplianceRAGSystem:
                 ]
             )
 
-            combined_query = f"""
-            SELECT BEST SUPPLIER AND ANALYZE COMPLIANCE - Single Query
-
-            Company Values: {company_values}
-            Industry: {industry}
-
-            Available suppliers:
-            {supplier_list}
-
-            TASK 1: Identify the ONE best supplier matching company values
-            TASK 2: Analyze that supplier's compliance
-
-            Score 0-100: 75+ strong verified evidence | 60-74 decent practices | 40-59 basic | <40 poor
-
-            Provide:
-            1. Selected supplier name (exact match from list)
-            2. Ethics score (0-100)
-            3. Sustainability score (0-100)
-            4. Combined score (average)
-            5. Ethics summary (2-3 sentences)
-            6. Sustainability summary (2-3 sentences)
-            7. Violations/gaps or "none verified"
-
-            Response format:
-            SELECTED_SUPPLIER: [name]
-            ETHICS_SCORE: [number]
-            SUSTAINABILITY_SCORE: [number]
-            COMBINED_SCORE: [number]
-            ETHICS_INFO: [summary]
-            SUSTAINABILITY_INFO: [summary]
-            VIOLATIONS: [list or "none verified"]
-            """
+            combined_query = compliance_prompt(company_values, industry, supplier_list)
 
             ctx.logger.info("Executing combined query...")
 
