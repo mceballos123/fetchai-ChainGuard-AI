@@ -40,7 +40,7 @@ compliance_workflow = None
 @compliance_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent, RAG system, and LangGraph workflow on startup"""
-    ctx.logger.info(" Compliance Agent starting up...")
+    ctx.logger.info("Compliance Agent starting up...")
     ctx.logger.info(f"Agent address: {compliance_agent.address}")
 
     # Initialize RAG system
@@ -51,14 +51,14 @@ async def startup(ctx: Context):
     success = await rag_system.initialize(ctx)
 
     if success:
-        ctx.logger.info(" Compliance Agent ready with RAG system!")
+        ctx.logger.info("Compliance Agent ready with RAG system!")
 
         # Build LangGraph workflow
         if compliance_workflow is None:
             compliance_workflow = build_compliance_workflow(rag_system, ctx)
-            ctx.logger.info(" ✓ LangGraph compliance workflow built!")
+            ctx.logger.info("LangGraph compliance workflow built!")
     else:
-        ctx.logger.warning(" Compliance Agent running in fallback mode (no RAG)")
+        ctx.logger.warning("Compliance Agent running in fallback mode (no RAG)")
 
     # Initialize state storage for supplier information
     ctx.storage.set("supplier_history", [])
@@ -74,7 +74,7 @@ async def startup(ctx: Context):
         },
     )
 
-    ctx.logger.info(" Listening for ComplianceRequest messages...")
+    ctx.logger.info("Listening for ComplianceRequest messages...")
 
     # Verify connection on startup
     conn_status = verify_compliance_connection(ctx)
@@ -85,12 +85,12 @@ async def startup(ctx: Context):
 @compliance_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info(" Compliance Agent shutting down...")
+    ctx.logger.info("Compliance Agent shutting down...")
 
     # Log final state before shutdown
     supplier_history = ctx.storage.get("supplier_history") or []
-    ctx.logger.info(f" Total suppliers processed: {len(supplier_history)}")
-    ctx.logger.info(" Workflow and RAG system cleanup complete")
+    ctx.logger.info(f"Total suppliers processed: {len(supplier_history)}")
+    ctx.logger.info("Workflow and RAG system cleanup complete")
 
 
 def get_supplier_state(ctx: Context) -> Dict[str, Any]:
@@ -124,11 +124,11 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
     5. Build ComplianceResponse from workflow result
     6. Return response to orchestrator
     """
-    ctx.logger.info(f" Received ComplianceRequest from {sender}")
-    ctx.logger.info(f"   Request ID: {msg.request_id}")
-    ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-    ctx.logger.info(f"   Industry: {msg.industry}")
-    ctx.logger.info(f"   Company values: {msg.company_values}")
+    ctx.logger.info(f"Received ComplianceRequest from {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier: {msg.supplier_name}")
+    ctx.logger.info(f"Industry: {msg.industry}")
+    ctx.logger.info(f"Company values: {msg.company_values}")
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -138,7 +138,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
     if previous_supplier:
         ctx.storage.set("previous_supplier", previous_supplier)
         ctx.logger.info(
-            f" Previous supplier stored: {previous_supplier.get('supplier_name', 'N/A')}"
+            f"Previous supplier stored: {previous_supplier.get('supplier_name', 'N/A')}"
         )
 
     # === STATE MANAGEMENT: Set new current supplier ===
@@ -151,18 +151,18 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         "sender": sender,
     }
     ctx.storage.set("current_supplier", current_supplier_info)
-    ctx.logger.info(f" Current supplier state updated: {msg.supplier_name}")
+    ctx.logger.info(f"Current supplier state updated: {msg.supplier_name}")
 
     # Log state transition if there was a previous supplier
     if previous_supplier:
         ctx.logger.info(
-            f" State Transition: {previous_supplier.get('supplier_name', 'N/A')} → {msg.supplier_name}"
+            f"State Transition: {previous_supplier.get('supplier_name', 'N/A')} → {msg.supplier_name}"
         )
 
     try:
         # === LANGGRAPH WORKFLOW ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("🔄 RUNNING LANGGRAPH COMPLIANCE WORKFLOW")
+        ctx.logger.info("RUNNING LANGGRAPH COMPLIANCE WORKFLOW")
         ctx.logger.info("=" * 70)
 
         # Create workflow state from request
@@ -218,7 +218,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
             workflow_result = compliance_workflow.invoke(workflow_state)
 
         ctx.logger.info("=" * 70)
-        ctx.logger.info(f"✓ Workflow completed: {workflow_result.get('current_step')}")
+        ctx.logger.info(f"Workflow completed: {workflow_result.get('current_step')}")
         ctx.logger.info("=" * 70 + "\n")
 
         # Build response based on workflow result
@@ -237,7 +237,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        ctx.logger.info(f" Compliance analysis complete!")
+        ctx.logger.info("Compliance analysis complete!")
         ctx.logger.info(f"Score: {response.compliance_score}/100")
         ctx.logger.info(f"Violations: {len(response.violations)}")
         ctx.logger.info(f"Status: {workflow_result.get('current_step', 'unknown')}")
@@ -255,7 +255,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         supplier_history = ctx.storage.get("supplier_history") or []
         supplier_history.append(current_supplier_info)
         ctx.storage.set("supplier_history", supplier_history)
-        ctx.logger.info(f" Added to history (total: {len(supplier_history)} suppliers)")
+        ctx.logger.info(f"Added to history (total: {len(supplier_history)} suppliers)")
 
         # Log response transmission
         log_response_transmission(
@@ -290,7 +290,8 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
 
         await ctx.send(sender, error_response)
 
-#/Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/compliance_agent.py
+
+# /Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/compliance_agent.py
 compliance_agent.include(compliance_protocol, publish_manifest=True)
 
 if __name__ == "__main__":

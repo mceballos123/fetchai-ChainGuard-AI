@@ -19,8 +19,7 @@ performance_protocol = Protocol(name="performance_protocol", version="1.0")
 
 # Load mock monitoring data
 MONITORING_DATA_PATH = os.path.join(
-    os.path.dirname(__file__),
-    "../../data/supplier_monitoring_data.json"
+    os.path.dirname(__file__), "../../data/supplier_monitoring_data.json"
 )
 
 
@@ -35,7 +34,7 @@ async def startup(ctx: Context):
         with open(MONITORING_DATA_PATH, "r") as f:
             monitoring_data = json.load(f)
             ctx.storage.set("monitoring_data", monitoring_data)
-            ctx.logger.info("✓ Monitoring data loaded successfully!")
+            ctx.logger.info("Monitoring data loaded successfully!")
     except Exception as e:
         ctx.logger.error(f"Error loading monitoring data: {e}")
         ctx.storage.set("monitoring_data", {"suppliers": {}})
@@ -62,7 +61,9 @@ async def shutdown(ctx: Context):
 
 
 @performance_protocol.on_message(model=PerformanceRequest, replies=PerformanceResponse)
-async def handle_performance_request(ctx: Context, sender: str, msg: PerformanceRequest):
+async def handle_performance_request(
+    ctx: Context, sender: str, msg: PerformanceRequest
+):
     """
     Handle performance monitoring request from Orchestrator Agent.
 
@@ -83,7 +84,9 @@ async def handle_performance_request(ctx: Context, sender: str, msg: Performance
 
         # Check if supplier exists in our monitoring database
         if msg.supplier_name not in suppliers:
-            ctx.logger.warning(f"Supplier '{msg.supplier_name}' not found in monitoring database")
+            ctx.logger.warning(
+                f"Supplier '{msg.supplier_name}' not found in monitoring database"
+            )
 
             # Return response indicating supplier not being monitored
             response = PerformanceResponse(
@@ -107,7 +110,9 @@ async def handle_performance_request(ctx: Context, sender: str, msg: Performance
             updates = supplier_data.get("monitoring_updates", [])
 
             if not updates:
-                ctx.logger.warning(f"No monitoring updates available for {msg.supplier_name}")
+                ctx.logger.warning(
+                    f"No monitoring updates available for {msg.supplier_name}"
+                )
                 response = PerformanceResponse(
                     request_id=msg.request_id,
                     supplier_name=msg.supplier_name,
@@ -135,7 +140,9 @@ async def handle_performance_request(ctx: Context, sender: str, msg: Performance
                 update_counters[msg.supplier_name] = (current_index + 1) % len(updates)
                 ctx.storage.set("update_counters", update_counters)
 
-                ctx.logger.info(f"   Location: {supplier_data.get('location', 'Unknown')}")
+                ctx.logger.info(
+                    f"   Location: {supplier_data.get('location', 'Unknown')}"
+                )
                 ctx.logger.info(f"   Using update #{update['update_number']}")
 
                 # Build response from update data
@@ -155,18 +162,19 @@ async def handle_performance_request(ctx: Context, sender: str, msg: Performance
                     timestamp="",
                 )
 
-        ctx.logger.info(f"Performance monitoring analysis complete!")
+        ctx.logger.info("Performance monitoring analysis complete!")
         ctx.logger.info(f"Overall Risk Level: {response.overall_risk_level}")
         ctx.logger.info(f"Active Alerts: {len(response.alerts)}")
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
 
-        ctx.logger.info(f"✓ Sent PerformanceResponse to {sender}")
+        ctx.logger.info(f"Sent PerformanceResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing performance request: {e}")
         import traceback
+
         traceback.print_exc()
 
         # Send error response

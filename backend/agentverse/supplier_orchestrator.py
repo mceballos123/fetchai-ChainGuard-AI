@@ -183,7 +183,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
             await ctx.send(PERFORMANCE_AGENT_ADDRESS, performance_request)
 
-            ctx.logger.info(f"✓ PerformanceRequest sent to Performance Agent")
+            ctx.logger.info(f"PerformanceRequest sent to Performance Agent")
             ctx.logger.info("=" * 70)
             ctx.logger.info("WAITING FOR PERFORMANCE RESPONSE...")
             ctx.logger.info("=" * 70)
@@ -231,7 +231,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     try:
         # Send to Compliance Agent
-        ctx.logger.info(f" Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+        ctx.logger.info(f"Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
         compliance_request = ComplianceRequest(
             request_id=msg_id,
             supplier_name=user_query,
@@ -284,7 +284,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             },
         )
 
-        ctx.logger.info(f"✓ FinancialRequest sent to Financial Agent")
+        ctx.logger.info(f"FinancialRequest sent to Financial Agent")
 
         # Send to Risk Management Agent
         ctx.logger.info(f"Sending to Risk Agent: {RISK_AGENT_ADDRESS}")
@@ -309,7 +309,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             },
         )
 
-        ctx.logger.info(f"✓ RiskRequest sent to Risk Agent")
+        ctx.logger.info(f"RiskRequest sent to Risk Agent")
         ctx.logger.info("=" * 70)
         ctx.logger.info("WAITING FOR ALL THREE RESPONSES...")
         ctx.logger.info("=" * 70)
@@ -342,7 +342,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 async def handle_acknowledgement(ctx: Context, sender: str, msg: ChatAcknowledgement):
     """Handle acknowledgment messages from user"""
     ctx.logger.info(
-        f" Acknowledgment received from {sender} for message: {msg.acknowledged_msg_id}"
+        f"Acknowledgment received from {sender} for message: {msg.acknowledged_msg_id}"
     )
 
 
@@ -355,7 +355,7 @@ async def handle_compliance_response(
 ):
     """Handle compliance response and wait for other responses before sending to user"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info(" Received Compliance Response (1/3)")
+    ctx.logger.info("Received Compliance Response (1/3)")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Compliance Agent
@@ -439,9 +439,9 @@ async def handle_financial_response(ctx: Context, sender: str, msg: FinancialRes
         pending_responses[msg.request_id]["financial_response"] = msg.model_dump()
         ctx.storage.set("pending_responses", pending_responses)
 
-        ctx.logger.info(f"✓ Financial response stored")
-        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-        ctx.logger.info(f"   Score: {msg.financial_score}/100")
+        ctx.logger.info(f"Financial response stored")
+        ctx.logger.info(f"Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"Score: {msg.financial_score}/100")
 
         # Check if we have both responses now
         await check_and_send_combined_response(ctx, msg.request_id)
@@ -485,9 +485,9 @@ async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
         pending_responses[msg.request_id]["risk_response"] = msg.model_dump()
         ctx.storage.set("pending_responses", pending_responses)
 
-        ctx.logger.info(f"✓ Risk response stored")
-        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-        ctx.logger.info(f"   Score: {msg.risk_score}/100")
+        ctx.logger.info(f"Risk response stored")
+        ctx.logger.info(f"Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"Score: {msg.risk_score}/100")
 
         # Check if we have all responses now
         await check_and_send_combined_response(ctx, msg.request_id)
@@ -503,7 +503,7 @@ async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
 async def handle_performance_response(ctx: Context, sender: str, msg: PerformanceResponse):
     """Handle performance monitoring response and send to user"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info("✓ Received Performance Monitoring Response")
+    ctx.logger.info("Received Performance Monitoring Response")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Performance Agent
@@ -535,63 +535,54 @@ async def handle_performance_response(ctx: Context, sender: str, msg: Performanc
             ctx.logger.error(f"No sender found for request {msg.request_id}")
             return
 
-        ctx.logger.info(f"✓ Performance response received")
-        ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-        ctx.logger.info(f"   Overall Risk: {msg.overall_risk_level}")
-        ctx.logger.info(f"   Alerts: {len(msg.alerts)}")
+        ctx.logger.info(f"Performance response received")
+        ctx.logger.info(f"Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"Overall Risk: {msg.overall_risk_level}")
+        ctx.logger.info(f"Alerts: {len(msg.alerts)}")
 
         # Build monitoring report
         alerts_text = ""
         if msg.alerts:
-            alerts_text = "\n".join([f"  ⚠️ {alert}" for alert in msg.alerts])
+            alerts_text = "\n".join([f"  • {alert}" for alert in msg.alerts])
         else:
-            alerts_text = "  ✓ No active alerts"
-
-        # Determine status icon based on overall risk
-        risk_icon = {
-            "LOW": "🟢",
-            "MEDIUM": "🟡",
-            "HIGH": "🟠",
-            "CRITICAL": "🔴",
-            "UNKNOWN": "⚪"
-        }.get(msg.overall_risk_level, "⚪")
+            alerts_text = "  • No active alerts"
 
         response_text = f"""
 SUPPLIER MONITORING UPDATE
 
 Supplier: {msg.supplier_name}
-Overall Risk Level: {risk_icon} {msg.overall_risk_level}
+Overall Risk Level: {msg.overall_risk_level}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-🌤️  WEATHER CONDITIONS
+WEATHER CONDITIONS
 Status: {msg.weather_status}
 {msg.weather_details}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-👷 LABOR & STRIKES
+LABOR & STRIKES
 Status: {msg.strike_status}
 {msg.strike_details}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-🏛️  POLITICAL ENVIRONMENT
+POLITICAL ENVIRONMENT
 Status: {msg.political_status}
 {msg.political_details}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-⚖️  LEGAL & REGULATORY
+LEGAL & REGULATORY
 Status: {msg.legal_status}
 {msg.legal_details}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
-🚨 ACTIVE ALERTS ({len(msg.alerts)})
+ACTIVE ALERTS ({len(msg.alerts)})
 {alerts_text}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+---
 
 This monitoring update helps you stay informed about external factors that may impact your supplier's operations. Request another update anytime to see the latest conditions.
         """
@@ -618,8 +609,8 @@ This monitoring update helps you stay informed about external factors that may i
             {"type": "monitoring_update", "risk_level": msg.overall_risk_level},
         )
 
-        ctx.logger.info(f"✓ Monitoring update sent to user")
-        ctx.logger.info(f"   Risk Level: {msg.overall_risk_level}")
+        ctx.logger.info(f"Monitoring update sent to user")
+        ctx.logger.info(f"Risk Level: {msg.overall_risk_level}")
 
         # Clean up session and pending responses
         active_sessions = ctx.storage.get("active_sessions") or {}
@@ -629,7 +620,7 @@ This monitoring update helps you stay informed about external factors that may i
         pending_responses.pop(msg.request_id, None)
         ctx.storage.set("pending_responses", pending_responses)
 
-        ctx.logger.info(f"✓ Session cleaned up for request {msg.request_id}")
+        ctx.logger.info(f"Session cleaned up for request {msg.request_id}")
         ctx.logger.info("=" * 70)
 
     except Exception as e:
@@ -658,10 +649,10 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
         or financial_response is None
         or risk_response is None
     ):
-        ctx.logger.info(f" Still waiting for responses...")
-        ctx.logger.info(f"   Compliance: {'✓' if compliance_response else '✗'}")
-        ctx.logger.info(f"   Financial: {'✓' if financial_response else '✗'}")
-        ctx.logger.info(f"   Risk: {'✓' if risk_response else '✗'}")
+        ctx.logger.info(f"Still waiting for responses...")
+        ctx.logger.info(f"Compliance: {'RECEIVED' if compliance_response else 'PENDING'}")
+        ctx.logger.info(f"Financial: {'RECEIVED' if financial_response else 'PENDING'}")
+        ctx.logger.info(f"Risk: {'RECEIVED' if risk_response else 'PENDING'}")
         return
 
     # We have all three responses! Combine them
@@ -824,13 +815,13 @@ RECOMMENDATION
         {"type": "combined_result", "approved": overall_approved},
     )
 
-    ctx.logger.info(f"✓ Combined response sent to user")
+    ctx.logger.info(f"Combined response sent to user")
     ctx.logger.info(
-        f"   Overall Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}"
+        f"Overall Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}"
     )
-    ctx.logger.info(f"   Compliance: {compliance_response.get('compliance_score')}/100")
-    ctx.logger.info(f"   Financial: {financial_response.get('financial_score')}/100")
-    ctx.logger.info(f"   Risk: {risk_response.get('risk_score')}/100")
+    ctx.logger.info(f"Compliance: {compliance_response.get('compliance_score')}/100")
+    ctx.logger.info(f"Financial: {financial_response.get('financial_score')}/100")
+    ctx.logger.info(f"Risk: {risk_response.get('risk_score')}/100")
 
     # Clean up session and pending responses
     active_sessions = ctx.storage.get("active_sessions") or {}
@@ -840,7 +831,7 @@ RECOMMENDATION
     pending_responses.pop(request_id, None)
     ctx.storage.set("pending_responses", pending_responses)
 
-    ctx.logger.info(f"✓ Session cleaned up for request {request_id}")
+    ctx.logger.info(f"Session cleaned up for request {request_id}")
     ctx.logger.info("=" * 70)
 
 

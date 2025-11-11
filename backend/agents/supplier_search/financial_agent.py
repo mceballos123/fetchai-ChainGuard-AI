@@ -123,7 +123,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     5. Build FinancialResponse from workflow result
     6. Return response to orchestrator
     """
-    ctx.logger.info(f"📥 Received FinancialRequest from {sender}")
+    ctx.logger.info(f"Received FinancialRequest from {sender}")
     ctx.logger.info(f"   Request ID: {msg.request_id}")
     ctx.logger.info(f"   Supplier: {msg.supplier_name}")
     ctx.logger.info(f"   Industry: {msg.industry}")
@@ -159,7 +159,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     try:
         # === LANGGRAPH WORKFLOW ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("RUNNING LANGGRAPH FINANCIAL WORKFLOW")
+        ctx.logger.info("Running LangGraph financial workflow")
         ctx.logger.info("=" * 70)
 
         # Create workflow state from request
@@ -230,7 +230,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        ctx.logger.info(f"Financial analysis complete!")
+        ctx.logger.info("Financial analysis complete!")
         ctx.logger.info(f"Financial Score: {response.financial_score}/100")
         ctx.logger.info(f"Status: {workflow_result.get('current_step', 'unknown')}")
 

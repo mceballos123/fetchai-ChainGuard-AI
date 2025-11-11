@@ -41,24 +41,19 @@ def _resolve_financial_path() -> Path:
     if FILE_PATH and FILE_PATH != "None":
         resolved = Path(FILE_PATH)
         if resolved.exists():
-            print(f"Using ENV path: {resolved}")
             return resolved
 
     # Option 2: Try relative path from backend directory
     relative_path = Path(__file__).parent.parent / "financial_files"
     if relative_path.exists():
-        print(f"Using relative path: {relative_path}")
         return relative_path
 
     # Option 3: Try from current working directory
     cwd_path = Path.cwd() / "backend" / "financial_files"
     if cwd_path.exists():
-        print(f"Using CWD path: {cwd_path}")
         return cwd_path
 
     # Fallback: Return the most likely path (will error appropriately in _load_financial_files)
-    print(f"No financial files found in any expected location")
-    print(f"  Checked: {FILE_PATH}, {relative_path}, {cwd_path}")
     return relative_path
 
 
@@ -67,8 +62,6 @@ PINECONE_INDEX_NAME_FINANCIAL = os.getenv(
     "PINECONE_INDEX_NAME_FINANCIAL", "financial-risk-index"
 )
 EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION", 768)
-print(f"Resolved financial path: {FINANCIAL_FILES_DIR}")
-print(f"Path exists: {FINANCIAL_FILES_DIR.exists()}")
 
 
 class FinancialRAGSystem:
@@ -160,7 +153,7 @@ class FinancialRAGSystem:
                 )
 
             ctx.logger.info(
-                f"Successfully loaded {len(self.documents)} financial documents"
+                f"Loaded {len(self.documents)} financial documents"
             )
             for i, doc in enumerate(self.documents, 1):
                 file_name = doc.metadata.get("file_name", "Unknown")
@@ -206,26 +199,14 @@ class FinancialRAGSystem:
                     .replace("_financial", "")
                 )
 
-                # Strategy 1: Exact match on file name
-                if normalized_supplier == doc_file_name.replace("_", " "):
+                # Multiple matching strategies
+                if (
+                    normalized_supplier == doc_file_name.replace("_", " ")
+                    or normalized_supplier in doc_file_name.replace("_", " ")
+                    or doc_file_name.replace("_", " ") in normalized_supplier
+                    or any(word in doc_file_name for word in normalized_supplier.split())
+                ):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (exact): {doc_file_name}")
-
-                # Strategy 2: Partial match (supplier name contains or is contained in file name)
-                elif normalized_supplier in doc_file_name.replace("_", " "):
-                    filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (partial): {doc_file_name}")
-
-                elif doc_file_name.replace("_", " ") in normalized_supplier:
-                    filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (file in supplier): {doc_file_name}")
-
-                # Strategy 3: Key word matching
-                elif any(word in doc_file_name for word in normalized_supplier.split()):
-                    filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (keyword): {doc_file_name}")
-                else:
-                    ctx.logger.info(f"EXCLUDED: {doc_file_name}")
 
             if not filtered_docs:
                 ctx.logger.error(
@@ -244,7 +225,6 @@ class FinancialRAGSystem:
             ctx.logger.info(
                 f"Filtered to {len(filtered_docs)} financial document(s) for: {supplier_name}"
             )
-            ctx.logger.info(f"  Now analyzing financial data for: {supplier_name}")
             return True
 
         except Exception as e:
@@ -325,8 +305,8 @@ class FinancialRAGSystem:
                 total_vectors = stats.get('total_vector_count', 0)
                 
                 if total_vectors > 0:
-                    ctx.logger.info(f"✓ Pinecone financial index already contains {total_vectors} vectors")
-                    ctx.logger.info("✓ Skipping document indexing (financial documents already in vector DB)")
+                    ctx.logger.info(f"Pinecone financial index already contains {total_vectors} vectors")
+                    ctx.logger.info("Skipping document indexing (financial documents already in vector DB)")
                     return True
                 else:
                     ctx.logger.info("Pinecone financial index is empty, proceeding with document indexing...")
@@ -353,7 +333,7 @@ class FinancialRAGSystem:
                 except Exception as e:
                     ctx.logger.warning(f"Error indexing financial node: {e}")
 
-            ctx.logger.info("✓ Financial documents indexed in Pinecone")
+            ctx.logger.info("Financial documents indexed in Pinecone")
             return True
 
         except Exception as e:
@@ -459,7 +439,7 @@ class FinancialRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         financial_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"Extracted FINANCIAL_SCORE: {financial_score}")
+                        ctx.logger.info(f"Financial Score: {financial_score}")
                     except (ValueError, IndexError) as e:
                         ctx.logger.warning(
                             f"Could not parse financial score from: {line} - {e}"
@@ -654,7 +634,7 @@ def financial_check_node(
     Output: financial_score, financial_details, risk_factors
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("FINANCIAL RISK CHECK NODE")
+    ctx.logger.info("Financial Risk Check Node")
     ctx.logger.info("=" * 70)
 
     try:
@@ -720,7 +700,7 @@ def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflow
     Prepares data to send to orchestrator agent.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("SUCCESS NODE - FINANCIAL RISK APPROVED")
+    ctx.logger.info("Success Node - Financial Risk Approved")
     ctx.logger.info("=" * 70)
 
     state["current_step"] = "financial_approved"
@@ -741,7 +721,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     Prepares error response.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("ERROR NODE - FINANCIAL RISK REJECTED")
+    ctx.logger.info("Error Node - Financial Risk Rejected")
     ctx.logger.info("=" * 70)
 
     financial_score = state.get("financial_score", 0.0)
@@ -809,6 +789,6 @@ def build_financial_workflow(
     # Compile workflow
     compiled_workflow = workflow.compile()
 
-    ctx.logger.info("Financial workflow built successfully!")
+    ctx.logger.info("Financial workflow built successfully")
 
     return compiled_workflow
