@@ -42,32 +42,25 @@ def _resolve_compliance_path() -> Path:
     if FILE_PATH and FILE_PATH != "None":
         resolved = Path(FILE_PATH)
         if resolved.exists():
-            print(f"✓ Using ENV path: {resolved}")
             return resolved
 
     # Option 2: Try relative path from backend directory
     relative_path = Path(__file__).parent.parent / "compliance_files"
     if relative_path.exists():
-        print(f"✓ Using relative path: {relative_path}")
         return relative_path
 
     # Option 3: Try from current working directory
     cwd_path = Path.cwd() / "backend" / "compliance_files"
     if cwd_path.exists():
-        print(f"✓ Using CWD path: {cwd_path}")
         return cwd_path
 
     # Fallback: Return the most likely path (will error appropriately in _load_compliance_files)
-    print(f"⚠ No compliance files found in any expected location")
-    print(f"  Checked: {FILE_PATH}, {relative_path}, {cwd_path}")
     return relative_path
 
 
 COMPLIANCE_FILES_DIR = _resolve_compliance_path()
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")  # gets the pinecone index name
 EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
-print(f"Resolved compliance path: {COMPLIANCE_FILES_DIR}")
-print(f"Path exists: {COMPLIANCE_FILES_DIR.exists()}")
 
 
 class ComplianceRAGSystem:
@@ -94,7 +87,7 @@ class ComplianceRAGSystem:
     async def initialize(self, ctx: Context) -> bool:
 
         try:
-            ctx.logger.info(" Initializing Compliance RAG System...")
+            ctx.logger.info("Initializing Compliance RAG System...")
 
             # Step 1: Load compliance files
             ctx.logger.info(f"Loading compliance files from {COMPLIANCE_FILES_DIR}")
@@ -128,17 +121,17 @@ class ComplianceRAGSystem:
             # Validate path exists
             if not COMPLIANCE_FILES_DIR.exists():
                 ctx.logger.error(
-                    f" Compliance files directory not found: {COMPLIANCE_FILES_DIR}"
+                    f"Compliance files directory not found: {COMPLIANCE_FILES_DIR}"
                 )
-                ctx.logger.error(f" Current working directory: {Path.cwd()}")
+                ctx.logger.error(f"Current working directory: {Path.cwd()}")
                 ctx.logger.error(
-                    f" Expected 5 compliance files in: {COMPLIANCE_FILES_DIR}"
+                    f"Expected 5 compliance files in: {COMPLIANCE_FILES_DIR}"
                 )
                 return False
 
             # List files before loading
             files_in_dir = list(COMPLIANCE_FILES_DIR.glob("*.txt"))
-            ctx.logger.info(f" Files found in directory: {len(files_in_dir)}")
+            ctx.logger.info(f"Files found in directory: {len(files_in_dir)}")
             for f in files_in_dir:
                 ctx.logger.info(f"   - {f.name}")
 
@@ -148,18 +141,18 @@ class ComplianceRAGSystem:
 
             # Validation checks
             if not self.documents:
-                ctx.logger.error(" No documents found in compliance_files folder")
+                ctx.logger.error("No documents found in compliance_files folder")
                 return False
 
             # Ensure we have all 5 expected documents
             expected_count = 5
             if len(self.documents) < expected_count:
                 ctx.logger.warning(
-                    f" Only loaded {len(self.documents)} documents, expected {expected_count}"
+                    f"Only loaded {len(self.documents)} documents, expected {expected_count}"
                 )
 
             ctx.logger.info(
-                f"✓ Successfully loaded {len(self.documents)} compliance documents"
+                f"Successfully loaded {len(self.documents)} compliance documents"
             )
             for i, doc in enumerate(self.documents, 1):
                 file_name = doc.metadata.get("file_name", "Unknown")
@@ -258,7 +251,7 @@ class ComplianceRAGSystem:
             # Log all available documents with their names
             for doc in self.documents:
                 doc_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"   - File: {doc_name}")
+                ctx.logger.info(f"File: {doc_name}")
 
             # Normalize supplier name for matching
             normalized_supplier = supplier_name.lower().replace("_", " ").strip()
@@ -274,29 +267,29 @@ class ComplianceRAGSystem:
                 # Strategy 1: Exact match on file name
                 if normalized_supplier == doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (exact): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (exact): {doc_file_name}")
 
                 # Strategy 2: Partial match (supplier name contains or is contained in file name)
                 elif normalized_supplier in doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (partial): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (partial): {doc_file_name}")
 
                 elif doc_file_name.replace("_", " ") in normalized_supplier:
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (file in supplier): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (file in supplier): {doc_file_name}")
 
                 # Strategy 3: Key word matching
                 elif any(word in doc_file_name for word in normalized_supplier.split()):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED (keyword): {doc_file_name}")
+                    ctx.logger.info(f"MATCHED (keyword): {doc_file_name}")
                 else:
-                    ctx.logger.info(f"✗ EXCLUDED: {doc_file_name}")
+                    ctx.logger.info(f"EXCLUDED: {doc_file_name}")
 
             if not filtered_docs:
                 ctx.logger.error(
-                    f"✗ No documents found for supplier: '{supplier_name}'"
+                    f"No documents found for supplier: '{supplier_name}'"
                 )
-                ctx.logger.error(f"  Searched for: '{normalized_supplier}'")
+                ctx.logger.error(f"Searched for: '{normalized_supplier}'")
                 ctx.logger.error(f"  Available files:")
                 for doc in self.documents:
                     ctx.logger.error(
@@ -307,9 +300,9 @@ class ComplianceRAGSystem:
             # Re-index with only the selected supplier
             self.documents = filtered_docs
             ctx.logger.info(
-                f"✓ Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
+                f"Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
             )
-            ctx.logger.info(f"  Now analyzing only: {supplier_name}")
+            ctx.logger.info(f"Now analyzing only: {supplier_name}")
             return True
 
         except Exception as e:
@@ -334,7 +327,7 @@ class ComplianceRAGSystem:
             existing_indexes = [idx.name for idx in pc.list_indexes()]
 
             if PINECONE_INDEX_NAME not in existing_indexes:
-                ctx.logger.info(f" Creating new Pinecone index: {PINECONE_INDEX_NAME}")
+                ctx.logger.info(f"Creating new Pinecone index: {PINECONE_INDEX_NAME}")
                 pc.create_index(
                     name=PINECONE_INDEX_NAME,
                     dimension=EMBEDDING_DIMENSION,
@@ -343,7 +336,7 @@ class ComplianceRAGSystem:
                 )
             else:
                 ctx.logger.info(
-                    f" Using existing Pinecone index: {PINECONE_INDEX_NAME}"
+                    f"Using existing Pinecone index: {PINECONE_INDEX_NAME}"
                 )
 
             # Get Pinecone index
@@ -388,10 +381,10 @@ class ComplianceRAGSystem:
 
                 if total_vectors > 0:
                     ctx.logger.info(
-                        f"✓ Pinecone compliance index already contains {total_vectors} vectors"
+                        f"Pinecone compliance index already contains {total_vectors} vectors"
                     )
                     ctx.logger.info(
-                        "✓ Skipping document indexing (compliance documents already in vector DB)"
+                        "Skipping document indexing (compliance documents already in vector DB)"
                     )
                     return True
                 else:
@@ -423,7 +416,7 @@ class ComplianceRAGSystem:
                 except Exception as e:
                     ctx.logger.warning(f"Error indexing node: {e}")
 
-            ctx.logger.info("✓ Compliance documents indexed in Pinecone")
+            ctx.logger.info("Compliance documents indexed in Pinecone")
             return True
 
         except Exception as e:
@@ -562,7 +555,7 @@ class ComplianceRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         ethics_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"✓ Extracted ETHICS_SCORE: {ethics_score}")
+                        ctx.logger.info(f"Extracted ETHICS_SCORE: {ethics_score}")
                     except (ValueError, IndexError) as e:
                         ctx.logger.warning(
                             f"Could not parse ethics score from: {line} - {e}"
@@ -586,7 +579,7 @@ class ComplianceRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         combined_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"✓ Extracted COMBINED_SCORE: {combined_score}")
+                        ctx.logger.info(f"Extracted COMBINED_SCORE: {combined_score}")
                     except (ValueError, IndexError) as e:
                         ctx.logger.warning(
                             f"Could not parse combined score from: {line} - {e}"
@@ -621,7 +614,7 @@ class ComplianceRAGSystem:
                     if content:
                         ethics_info = content
                         ctx.logger.info(
-                            f"✓ Extracted ETHICS_INFO: {ethics_info[:60]}..."
+                            f"Extracted ETHICS_INFO: {ethics_info[:60]}..."
                         )
 
                 elif "sustainability_info:" in line_lower:
@@ -652,14 +645,14 @@ class ComplianceRAGSystem:
                     if content:
                         sustainability_info = content
                         ctx.logger.info(
-                            f"✓ Extracted SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
+                            f"Extracted SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
                         )
 
                 elif "violations:" in line_lower:
                     violations_str = line.split(":", 1)[-1].strip().lower()
                     if violations_str != "none" and violations_str:
                         violations = [v.strip() for v in violations_str.split(",")]
-                    ctx.logger.info(f"✓ Extracted VIOLATIONS: {violations}")
+                    ctx.logger.info(f"Extracted VIOLATIONS: {violations}")
 
             # Fallback: If we still have "Insufficient data", try to extract from raw text
             if ethics_info == "Insufficient data":
@@ -672,7 +665,7 @@ class ComplianceRAGSystem:
                     if ethics_section:
                         ethics_info = ethics_section
                         ctx.logger.info(
-                            f"✓ Fallback ETHICS_INFO: {ethics_info[:60]}..."
+                            f"Fallback ETHICS_INFO: {ethics_info[:60]}..."
                         )
 
             if sustainability_info == "Insufficient data":
@@ -687,14 +680,14 @@ class ComplianceRAGSystem:
                     if sustainability_section:
                         sustainability_info = sustainability_section
                         ctx.logger.info(
-                            f"✓ Fallback SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
+                            f"Fallback SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
                         )
 
             # If combined_score wasn't provided, calculate it
             if combined_score == 50.0:
                 combined_score = (ethics_score + sustainability_score) / 2
                 ctx.logger.info(
-                    f"ℹ️  Combined score calculated from ethics+sustainability: {combined_score}"
+                    f"Combined score calculated from ethics+sustainability: {combined_score}"
                 )
 
             ctx.logger.info("=" * 70)
@@ -868,7 +861,7 @@ def compliance_check_node(
     Output: compliance_score, ethics_info, sustainability_info, violations
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("🔍 COMPLIANCE CHECK NODE")
+    ctx.logger.info("COMPLIANCE CHECK NODE")
     ctx.logger.info("=" * 70)
 
     try:
@@ -891,13 +884,13 @@ def compliance_check_node(
         state["rag_context"] = rag_result.get("retrieved_context", "")
         state["current_step"] = "compliance_check_complete"
 
-        ctx.logger.info(f"✓ Compliance Score: {state['compliance_score']}/100")
-        ctx.logger.info(f"✓ Violations: {len(state['violations'])}")
+        ctx.logger.info(f"Compliance Score: {state['compliance_score']}/100")
+        ctx.logger.info(f"Violations: {len(state['violations'])}")
 
         return state
 
     except Exception as e:
-        ctx.logger.error(f"❌ Error in compliance check: {e}")
+        ctx.logger.error(f"Error in compliance check: {e}")
         state["current_step"] = "compliance_check_failed"
         state["error_message"] = f"Compliance check failed: {str(e)}"
         state["compliance_score"] = 0.0
@@ -938,7 +931,7 @@ def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflow
     Prepares data to send to orchestrator agent.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("✅ SUCCESS NODE - COMPLIANCE APPROVED")
+    ctx.logger.info("SUCCESS NODE - COMPLIANCE APPROVED")
     ctx.logger.info("=" * 70)
 
     state["current_step"] = "compliance_approved"
@@ -959,7 +952,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     Prepares error response.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("❌ ERROR NODE - COMPLIANCE REJECTED")
+    ctx.logger.info("ERROR NODE - COMPLIANCE REJECTED")
     ctx.logger.info("=" * 70)
 
     compliance_score = state.get("compliance_score", 0.0)
@@ -999,7 +992,7 @@ def build_compliance_workflow(
     Returns:
         Compiled StateGraph workflow
     """
-    ctx.logger.info("🏗️ Building Compliance LangGraph Workflow...")
+    ctx.logger.info("Building Compliance LangGraph Workflow...")
 
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
@@ -1027,6 +1020,6 @@ def build_compliance_workflow(
     # Compile workflow
     compiled_workflow = workflow.compile()
 
-    ctx.logger.info("✓ Compliance workflow built successfully!")
+    ctx.logger.info("Compliance workflow built successfully!")
 
     return compiled_workflow

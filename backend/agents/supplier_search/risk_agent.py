@@ -48,12 +48,12 @@ async def startup(ctx: Context):
     success = await rag_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("✓ Risk Management Agent ready with RAG system!")
+        ctx.logger.info("Risk Management Agent ready with RAG system!")
 
         # Build LangGraph workflow
         if risk_workflow is None:
             risk_workflow = build_risk_workflow(rag_system, ctx)
-            ctx.logger.info("✓ LangGraph risk management workflow built!")
+            ctx.logger.info("LangGraph risk management workflow built!")
     else:
         ctx.logger.warning("Risk Management Agent running in fallback mode (no RAG)")
 
@@ -89,7 +89,9 @@ async def shutdown(ctx: Context):
 
 
 @risk_protocol.on_message(model=RiskRequest, replies=RiskResponse)
-async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest): # Causing a issue with the risk_agent
+async def handle_risk_request(
+    ctx: Context, sender: str, msg: RiskRequest
+):  # Causing a issue with the risk_agent
     """
     Handle risk management check request from Orchestrator Agent.
 
@@ -122,7 +124,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest): # Ca
     try:
         # === LANGGRAPH WORKFLOW ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("🔄 RUNNING LANGGRAPH RISK MANAGEMENT WORKFLOW")
+        ctx.logger.info("RUNNING LANGGRAPH RISK MANAGEMENT WORKFLOW")
         ctx.logger.info("=" * 70)
 
         # Create workflow state from request
@@ -177,7 +179,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest): # Ca
             workflow_result = risk_workflow.invoke(workflow_state)
 
         ctx.logger.info("=" * 70)
-        ctx.logger.info(f"✓ Workflow completed: {workflow_result.get('current_step')}")
+        ctx.logger.info(f"Workflow completed: {workflow_result.get('current_step')}")
         ctx.logger.info("=" * 70 + "\n")
 
         # Build response based on workflow result
@@ -195,7 +197,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest): # Ca
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        ctx.logger.info(f"Risk management analysis complete!")
+        ctx.logger.info("Risk management analysis complete!")
         ctx.logger.info(f"Score: {response.risk_score}/100")
         ctx.logger.info(f"Risk Factors: {len(response.risk_factors)}")
         ctx.logger.info(f"Status: {workflow_result.get('current_step', 'unknown')}")

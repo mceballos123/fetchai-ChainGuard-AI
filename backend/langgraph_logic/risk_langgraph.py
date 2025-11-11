@@ -42,31 +42,24 @@ def _resolve_risk_path() -> Path:
     if FILE_PATH and FILE_PATH != "None":
         resolved = Path(FILE_PATH)
         if resolved.exists():
-            print(f"✓ Using ENV path: {resolved}")
             return resolved
 
     # Option 2: Try relative path from backend directory
     relative_path = Path(__file__).parent.parent / "risk_management_files"
     if relative_path.exists():
-        print(f"✓ Using relative path: {relative_path}")
         return relative_path
 
     # Option 3: Try from current working directory
     cwd_path = Path.cwd() / "backend" / "risk_management_files"
     if cwd_path.exists():
-        print(f"✓ Using CWD path: {cwd_path}")
         return cwd_path
 
     # Fallback: Return the most likely path
-    print(f"⚠ No risk management files found in any expected location")
-    print(f"  Checked: {FILE_PATH}, {relative_path}, {cwd_path}")
     return relative_path
 
 
 RISK_FILES_DIR = _resolve_risk_path()
 EMBEDDING_DIMENSION = 768
-print(f"Resolved risk management path: {RISK_FILES_DIR}")
-print(f"Path exists: {RISK_FILES_DIR.exists()}")
 
 
 class RiskRAGSystem:
@@ -151,9 +144,7 @@ class RiskRAGSystem:
                     f"Only loaded {len(self.documents)} documents, expected {expected_count}"
                 )
 
-            ctx.logger.info(
-                f"✓ Successfully loaded {len(self.documents)} risk management documents"
-            )
+            ctx.logger.info(f"Loaded {len(self.documents)} risk management documents")
             for i, doc in enumerate(self.documents, 1):
                 file_name = doc.metadata.get("file_name", "Unknown")
                 ctx.logger.info(f"   {i}. {file_name}")
@@ -193,18 +184,17 @@ class RiskRAGSystem:
                     )
                 ):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"✓ MATCHED: {doc_file_name}")
 
             if not filtered_docs:
                 ctx.logger.error(
-                    f"✗ No documents found for supplier: '{supplier_name}'"
+                    f"No risk documents found for supplier: '{supplier_name}'"
                 )
                 return False
 
             # Re-index with only the selected supplier
             self.documents = filtered_docs
             ctx.logger.info(
-                f"✓ Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
+                f"Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
             )
             return True
 
@@ -282,10 +272,10 @@ class RiskRAGSystem:
 
                 if total_vectors > 0:
                     ctx.logger.info(
-                        f"✓ Pinecone index already contains {total_vectors} vectors"
+                        f"Pinecone index already contains {total_vectors} vectors"
                     )
                     ctx.logger.info(
-                        "✓ Skipping document indexing (documents already in vector DB)"
+                        "Skipping document indexing (documents already in vector DB)"
                     )
                     return True
                 else:
@@ -317,7 +307,7 @@ class RiskRAGSystem:
                 except Exception as e:
                     ctx.logger.warning(f"Error indexing node: {e}")
 
-            ctx.logger.info("✓ Documents indexed in Pinecone")
+            ctx.logger.info("Documents indexed in Pinecone")
             return True
 
         except Exception as e:
@@ -357,8 +347,6 @@ class RiskRAGSystem:
 
             # Build risk query
             risk_query = risk_prompt(supplier_name, industry)
-            
-        
 
             ctx.logger.info("Executing risk management query...")
             response = self.query_engine.query(risk_query)
@@ -406,7 +394,7 @@ class RiskRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         risk_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"✓ Extracted RISK_SCORE: {risk_score}")
+                        ctx.logger.info(f"Risk Score: {risk_score}")
                     except (ValueError, IndexError) as e:
                         ctx.logger.warning(
                             f"Could not parse risk score from: {line} - {e}"
@@ -437,9 +425,7 @@ class RiskRAGSystem:
 
                     if content:
                         risk_details = content
-                        ctx.logger.info(
-                            f"✓ Extracted RISK_DETAILS: {risk_details[:60]}..."
-                        )
+                        ctx.logger.info(f"Risk Details: {risk_details[:60]}...")
 
                 elif "risk_factors:" in line_lower:
                     factors_str = line.split(":", 1)[-1].strip().lower()
@@ -449,7 +435,7 @@ class RiskRAGSystem:
                         and "none" not in factors_str
                     ):
                         risk_factors = [f.strip() for f in factors_str.split(",")]
-                    ctx.logger.info(f"✓ Extracted RISK_FACTORS: {risk_factors}")
+                    ctx.logger.info(f"Risk Factors: {risk_factors}")
 
             ctx.logger.info("=" * 70)
             ctx.logger.info(f"FINAL PARSED SCORES:")
@@ -566,7 +552,7 @@ def risk_check_node(
     Output: risk_score, risk_details, risk_factors
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("🔍 RISK MANAGEMENT CHECK NODE")
+    ctx.logger.info("Risk Management Check Node")
     ctx.logger.info("=" * 70)
 
     try:
@@ -586,8 +572,8 @@ def risk_check_node(
         state["risk_factors"] = rag_result.get("risk_factors", [])
         state["current_step"] = "risk_check_complete"
 
-        ctx.logger.info(f"✓ Risk Score: {state['risk_score']}/100")
-        ctx.logger.info(f"✓ Risk Factors: {len(state['risk_factors'])}")
+        ctx.logger.info(f"Risk Score: {state['risk_score']}/100")
+        ctx.logger.info(f"Risk Factors: {len(state['risk_factors'])}")
 
         return state
 
@@ -631,7 +617,7 @@ def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflow
     Node 3a: Success path - Supplier meets risk management requirements.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("✅ SUCCESS NODE - RISK MANAGEMENT APPROVED")
+    ctx.logger.info("Success Node - Risk Management Approved")
     ctx.logger.info("=" * 70)
 
     state["current_step"] = "risk_approved"
@@ -650,7 +636,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     Node 3b: Error path - Supplier does not meet requirements.
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("ERROR NODE - RISK MANAGEMENT REJECTED")
+    ctx.logger.info("Error Node - Risk Management Rejected")
     ctx.logger.info("=" * 70)
 
     risk_score = state.get("risk_score", 0.0)
@@ -683,7 +669,7 @@ def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
     Returns:
         Compiled StateGraph workflow
     """
-    ctx.logger.info("🏗️ Building Risk Management LangGraph Workflow...")
+    ctx.logger.info("Building Risk Management LangGraph Workflow...")
 
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
@@ -711,6 +697,6 @@ def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
     # Compile workflow
     compiled_workflow = workflow.compile()
 
-    ctx.logger.info("✓ Risk management workflow built successfully!")
+    ctx.logger.info("Risk management workflow built successfully!")
 
     return compiled_workflow
