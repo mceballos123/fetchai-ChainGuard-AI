@@ -14,11 +14,12 @@ from uagents_core.contrib.protocols.chat import (
     chat_protocol_spec,
 )
 
-# Import compliance, financial, risk, and performance models
+# Import compliance, financial, risk, performance, and demand models
 from backend.models.compliance import ComplianceRequest, ComplianceResponse
 from backend.models.financial import FinancialRequest, FinancialResponse
 from backend.models.risk import RiskRequest, RiskResponse
 from backend.models.performance import PerformanceRequest, PerformanceResponse
+from backend.models.demand import DemandRequest, DemandResponse
 
 # Import test utilities
 from backend.test_func import (
@@ -52,6 +53,9 @@ RISK_AGENT_ADDRESS = os.getenv(
 PERFORMANCE_AGENT_ADDRESS = os.getenv(
     "PERFORMANCE_AGENT_ADDRESS",
 )
+DEMAND_AGENT_ADDRESS = os.getenv(
+    "DEMAND_AGENT_ADDRESS",
+)
 
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
@@ -67,6 +71,7 @@ async def startup(ctx: Context):
     ctx.logger.info(f"Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
     ctx.logger.info(f"Risk Agent: {RISK_AGENT_ADDRESS}")
     ctx.logger.info(f"Performance Agent: {PERFORMANCE_AGENT_ADDRESS}")
+    ctx.logger.info(f"Demand Agent: {DEMAND_AGENT_ADDRESS}")
 
     ctx.storage.set("active_sessions", {})
     ctx.storage.set("approved_suppliers", [])
@@ -176,9 +181,9 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     # Step 5: Route based on mode
     if is_monitoring_request:
-        # MONITORING MODE: Forward to Performance Agent only
+        # MONITORING MODE: Forward to Performance and Demand Agents
         ctx.logger.info("=" * 70)
-        ctx.logger.info("MONITORING MODE - FORWARDING TO PERFORMANCE AGENT")
+        ctx.logger.info("MONITORING MODE - FORWARDING TO PERFORMANCE AND DEMAND AGENTS")
         ctx.logger.info("=" * 70)
 
         # Get the selected supplier (from the find_supplier phase)
@@ -206,10 +211,11 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             )
             return
 
-        # Initialize pending responses for monitoring
+        # Initialize pending responses for monitoring (both performance and demand)
         pending_responses = ctx.storage.get("pending_responses") or {}
         pending_responses[msg_id] = {
             "performance_response": None,
+            "demand_response": None,
             "sender": sender,
             "user_query": user_query,
             "mode": "monitor",
@@ -231,12 +237,27 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             await ctx.send(PERFORMANCE_AGENT_ADDRESS, performance_request)
 
             ctx.logger.info(f"PerformanceRequest sent to Performance Agent")
+
+            # Send to Demand Agent with the selected supplier
+            ctx.logger.info(
+                f"Sending to Demand Agent: {DEMAND_AGENT_ADDRESS}"
+            )
+            ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
+            demand_request = DemandRequest(
+                request_id=msg_id,
+                supplier_name=selected_supplier,
+                timestamp="",
+            )
+
+            await ctx.send(DEMAND_AGENT_ADDRESS, demand_request)
+
+            ctx.logger.info(f"DemandRequest sent to Demand Agent")
             ctx.logger.info("=" * 70)
-            ctx.logger.info("WAITING FOR PERFORMANCE RESPONSE...")
+            ctx.logger.info("WAITING FOR PERFORMANCE AND DEMAND RESPONSES...")
             ctx.logger.info("=" * 70)
 
         except Exception as e:
-            ctx.logger.error(f"Error sending to performance agent: {e}")
+            ctx.logger.error(f"Error sending to monitoring agents: {e}")
 
             # Clean up pending responses
             pending_responses.pop(msg_id, None)
@@ -460,6 +481,9 @@ risk_protocol = Protocol(name="risk_response_protocol", version="1.0")
 # Add Performance Response Protocol
 performance_protocol = Protocol(name="performance_response_protocol", version="1.0")
 
+# Add Demand Response Protocol
+demand_protocol = Protocol(name="demand_response_protocol", version="1.0")
+
 
 @financial_protocol.on_message(model=FinancialResponse)
 async def handle_financial_response(ctx: Context, sender: str, msg: FinancialResponse):
@@ -553,13 +577,59 @@ async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
         traceback.print_exc()
 
 
+@demand_protocol.on_message(model=DemandResponse)
+async def handle_demand_response(ctx: Context, sender: str, msg: DemandResponse):
+    """Handle demand forecast response and wait for performance response"""
+    ctx.logger.info("=" * 60)
+    ctx.logger.info("Received Demand Forecast Response (1/2)")
+    ctx.logger.info("=" * 60)
+
+    # Verify message received from Demand Agent
+    log_message_transmission(
+        ctx,
+        "RECEIVED",
+        "DemandResponse",
+        msg.request_id,
+        {
+            "supplier_name": msg.supplier_name,
+            "overall_performance": msg.overall_performance,
+        },
+    )
+
+    try:
+        # Store demand response in pending_responses
+        pending_responses = ctx.storage.get("pending_responses") or {}
+
+        if msg.request_id not in pending_responses:
+            ctx.logger.warning(
+                f"No pending response tracking for request {msg.request_id}"
+            )
+            return
+
+        pending_responses[msg.request_id]["demand_response"] = msg.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
+
+        ctx.logger.info(f"Demand response stored")
+        ctx.logger.info(f"Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"Overall Performance: {msg.overall_performance}")
+
+        # Check if we have both monitoring responses now
+        await check_and_send_monitoring_response(ctx, msg.request_id)
+
+    except Exception as e:
+        ctx.logger.error(f"Error handling demand response: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
 @performance_protocol.on_message(model=PerformanceResponse)
 async def handle_performance_response(
     ctx: Context, sender: str, msg: PerformanceResponse
 ):
-    """Handle performance monitoring response and send to user"""
+    """Handle performance monitoring response and wait for demand response"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info("Received Performance Monitoring Response")
+    ctx.logger.info("Received Performance Monitoring Response (2/2)")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Performance Agent
@@ -575,7 +645,7 @@ async def handle_performance_response(
     )
 
     try:
-        # Get pending response data
+        # Store performance response in pending_responses
         pending_responses = ctx.storage.get("pending_responses") or {}
 
         if msg.request_id not in pending_responses:
@@ -584,106 +654,181 @@ async def handle_performance_response(
             )
             return
 
-        response_data = pending_responses[msg.request_id]
-        user_sender = response_data.get("sender")
+        pending_responses[msg.request_id]["performance_response"] = msg.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
 
-        if not user_sender:
-            ctx.logger.error(f"No sender found for request {msg.request_id}")
-            return
-
-        ctx.logger.info(f"Performance response received")
+        ctx.logger.info(f"Performance response stored")
         ctx.logger.info(f"Supplier: {msg.supplier_name}")
         ctx.logger.info(f"Overall Risk: {msg.overall_risk_level}")
         ctx.logger.info(f"Alerts: {len(msg.alerts)}")
 
-        # Build monitoring report
-        alerts_text = ""
-        if msg.alerts:
-            alerts_text = "\n".join([f"  • {alert}" for alert in msg.alerts])
-        else:
-            alerts_text = "  • No active alerts"
-
-        response_text = f"""
-SUPPLIER MONITORING UPDATE
-
-Supplier: {msg.supplier_name}
-Overall Risk Level: {msg.overall_risk_level}
-
----
-
-WEATHER CONDITIONS
-Status: {msg.weather_status}
-{msg.weather_details}
-
----
-
-LABOR & STRIKES
-Status: {msg.strike_status}
-{msg.strike_details}
-
----
-
-POLITICAL ENVIRONMENT
-Status: {msg.political_status}
-{msg.political_details}
-
----
-
-LEGAL & REGULATORY
-Status: {msg.legal_status}
-{msg.legal_details}
-
----
-
-ACTIVE ALERTS ({len(msg.alerts)})
-{alerts_text}
-
----
-
-This monitoring update helps you stay informed about external factors that may impact your supplier's operations. Request another update anytime to see the latest conditions.
-        """
-
-        # Send monitoring response back to user
-        ctx.logger.info(f"Sending monitoring update to user: {user_sender}")
-
-        response = ChatMessage(
-            timestamp="",
-            msg_id=uuid4(),
-            content=[
-                TextContent(type="text", text=response_text.strip()),
-                EndSessionContent(type="end-session"),
-            ],
-        )
-
-        await ctx.send(user_sender, response)
-
-        log_message_transmission(
-            ctx,
-            "SENT",
-            "ChatMessage",
-            str(response.msg_id),
-            {"type": "monitoring_update", "risk_level": msg.overall_risk_level},
-        )
-
-        ctx.logger.info(f"Monitoring update sent to user")
-        ctx.logger.info(f"Risk Level: {msg.overall_risk_level}")
-
-        # Clean up session and pending responses
-        active_sessions = ctx.storage.get("active_sessions") or {}
-        active_sessions.pop(msg.request_id, None)
-        ctx.storage.set("active_sessions", active_sessions)
-
-        pending_responses.pop(msg.request_id, None)
-        ctx.storage.set("pending_responses", pending_responses)
-
-        ctx.logger.info(f"Session cleaned up for request {msg.request_id}")
-        ctx.logger.info("=" * 70)
+        # Check if we have both monitoring responses now
+        await check_and_send_monitoring_response(ctx, msg.request_id)
 
     except Exception as e:
         ctx.logger.error(f"Error handling performance response: {e}")
         import traceback
 
         traceback.print_exc()
+
+
+async def check_and_send_monitoring_response(ctx: Context, request_id: str):
+    """Check if both monitoring responses are received, combine them, and send to user"""
+    pending_responses = ctx.storage.get("pending_responses") or {}
+
+    if request_id not in pending_responses:
+        ctx.logger.warning(f"No pending response for request {request_id}")
+        return
+
+    response_data = pending_responses[request_id]
+    performance_response = response_data.get("performance_response")
+    demand_response = response_data.get("demand_response")
+
+    # Check if we have BOTH monitoring responses
+    if performance_response is None or demand_response is None:
+        ctx.logger.info(f"Still waiting for monitoring responses...")
+        ctx.logger.info(
+            f"Performance: {'RECEIVED' if performance_response else 'PENDING'}"
+        )
+        ctx.logger.info(f"Demand: {'RECEIVED' if demand_response else 'PENDING'}")
+        return
+
+    # We have both responses! Combine them
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("ALL MONITORING RESPONSES RECEIVED - COMBINING RESULTS")
+    ctx.logger.info("=" * 70)
+
+    user_sender = response_data.get("sender")
+
+    if not user_sender:
+        ctx.logger.error(f"No sender found for request {request_id}")
+        return
+
+    # Build combined monitoring report
+    performance_alerts_text = ""
+    if performance_response.get("alerts"):
+        performance_alerts_text = "\n".join(
+            [f"  • {alert}" for alert in performance_response.get("alerts", [])]
+        )
+    else:
+        performance_alerts_text = "  • No active alerts"
+
+    demand_alerts_text = ""
+    if demand_response.get("alerts"):
+        demand_alerts_text = "\n".join(
+            [f"  • {alert}" for alert in demand_response.get("alerts", [])]
+        )
+    else:
+        demand_alerts_text = "  • No active alerts"
+
+    response_text = f"""
+SUPPLIER MONITORING UPDATE
+
+Supplier: {performance_response.get('supplier_name', 'N/A')}
+Overall Risk Level: {performance_response.get('overall_risk_level', 'N/A')}
+Overall Performance: {demand_response.get('overall_performance', 'N/A')}
+
+===== EXTERNAL FACTORS (PERFORMANCE MONITORING) =====
+
+WEATHER CONDITIONS
+Status: {performance_response.get('weather_status', 'N/A')}
+{performance_response.get('weather_details', 'N/A')}
+
+---
+
+LABOR & STRIKES
+Status: {performance_response.get('strike_status', 'N/A')}
+{performance_response.get('strike_details', 'N/A')}
+
+---
+
+POLITICAL ENVIRONMENT
+Status: {performance_response.get('political_status', 'N/A')}
+{performance_response.get('political_details', 'N/A')}
+
+---
+
+LEGAL & REGULATORY
+Status: {performance_response.get('legal_status', 'N/A')}
+{performance_response.get('legal_details', 'N/A')}
+
+---
+
+PERFORMANCE ALERTS ({len(performance_response.get('alerts', []))})
+{performance_alerts_text}
+
+===== OPERATIONAL METRICS (DEMAND FORECAST) =====
+
+DELIVERY & DELAYS
+Status: {demand_response.get('delay_status', 'N/A')}
+{demand_response.get('delay_details', 'N/A')}
+
+---
+
+SHIPPING & LOGISTICS
+Status: {demand_response.get('shipping_status', 'N/A')}
+{demand_response.get('shipping_details', 'N/A')}
+
+---
+
+QUALITY TRACKING
+Status: {demand_response.get('quality_status', 'N/A')}
+{demand_response.get('quality_details', 'N/A')}
+
+---
+
+DEMAND ALERTS ({len(demand_response.get('alerts', []))})
+{demand_alerts_text}
+
+---
+
+This comprehensive monitoring update combines external factors and operational metrics to give you a complete view of your supplier's performance. Request another update anytime to see the latest conditions.
+    """
+
+    # Send combined monitoring response back to user
+    ctx.logger.info(f"Sending combined monitoring update to user: {user_sender}")
+
+    response = ChatMessage(
+        timestamp="",
+        msg_id=uuid4(),
+        content=[
+            TextContent(type="text", text=response_text.strip()),
+            EndSessionContent(type="end-session"),
+        ],
+    )
+
+    await ctx.send(user_sender, response)
+
+    log_message_transmission(
+        ctx,
+        "SENT",
+        "ChatMessage",
+        str(response.msg_id),
+        {
+            "type": "monitoring_update",
+            "risk_level": performance_response.get("overall_risk_level"),
+            "performance": demand_response.get("overall_performance"),
+        },
+    )
+
+    ctx.logger.info(f"Combined monitoring update sent to user")
+    ctx.logger.info(
+        f"Risk Level: {performance_response.get('overall_risk_level', 'N/A')}"
+    )
+    ctx.logger.info(
+        f"Performance: {demand_response.get('overall_performance', 'N/A')}"
+    )
+
+    # Clean up session and pending responses
+    active_sessions = ctx.storage.get("active_sessions") or {}
+    active_sessions.pop(request_id, None)
+    ctx.storage.set("active_sessions", active_sessions)
+
+    pending_responses.pop(request_id, None)
+    ctx.storage.set("pending_responses", pending_responses)
+
+    ctx.logger.info(f"Session cleaned up for request {request_id}")
+    ctx.logger.info("=" * 70)
 
 
 async def check_and_send_combined_response(ctx: Context, request_id: str):
@@ -912,6 +1057,7 @@ supplier_orchestrator.include(compliance_protocol, publish_manifest=True)
 supplier_orchestrator.include(financial_protocol, publish_manifest=True)
 supplier_orchestrator.include(risk_protocol, publish_manifest=True)
 supplier_orchestrator.include(performance_protocol, publish_manifest=True)
+supplier_orchestrator.include(demand_protocol, publish_manifest=True)
 
 if __name__ == "__main__":
     supplier_orchestrator.run()
