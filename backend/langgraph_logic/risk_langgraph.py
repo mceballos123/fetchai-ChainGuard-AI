@@ -20,6 +20,7 @@ from pinecone import Pinecone, ServerlessSpec
 from llama_index.llms.ollama import Ollama
 
 from langgraph.graph import StateGraph, START, END
+from ..prompts.risk_prompt import risk_prompt
 
 load_dotenv()
 
@@ -355,40 +356,9 @@ class RiskRAGSystem:
                 return self._generate_fallback_response(supplier_name)
 
             # Build risk query
-            risk_query = f"""
-            RISK MANAGEMENT ANALYSIS: {supplier_name} ({industry})
+            risk_query = risk_prompt(supplier_name, industry)
             
-            Score 0-100 (higher score = lower risk, better supplier):
-            - 85-100: Excellent risk management, minimal vulnerabilities
-            - 70-84: Good risk management, acceptable with minor considerations (APPROVED)
-            - 60-69: Moderate risk, requires careful evaluation (NEEDS REVIEW)
-            - 50-59: Significant risks requiring mitigation plans
-            - Below 50: High risk, major concerns present
-            
-            SCORING GUIDANCE:
-            - Start with a baseline of 75 points for standard operations
-            - Add points (+5-15) for: strong infrastructure, disaster preparedness, diversified supply chains, excellent logistics
-            - Deduct points (-5-15) for: capacity issues, high disaster exposure, poor logistics, supply chain concentration
-            - Be realistic: most functional suppliers should score 70-85
-            - Approval threshold is 70 points - suppliers scoring 70+ are acceptable
-            - Only score below 50 if there are serious, documented concerns that could impact the supplier's ability to fulfill the order or the supplier's reputation.
-            
-            Evaluate these risk factors:
-            - Capacity constraints (can they handle demand?)
-            - Natural disaster exposure (location vulnerabilities including weather event that could impact the supplier)
-            - Logistics and accessibility (transportation, infrastructure)
-            - Supply chain dependencies (single points of failure?)
-            
-            Provide a balanced assessment:
-            1. Risk score (0-100) - Be fair and realistic
-            2. Risk summary (2-3 sentences): highlight both strengths and concerns
-            3. Risk factors: list specific concerns, or "minimal risks identified" even if the supplier is approved.
-            
-            Response format:
-            RISK_SCORE: [number]
-            RISK_DETAILS: [balanced 2-3 sentence summary]
-            RISK_FACTORS: [specific issues or "minimal risks identified even if the supplier is approved"]
-            """
+        
 
             ctx.logger.info("Executing risk management query...")
             response = self.query_engine.query(risk_query)

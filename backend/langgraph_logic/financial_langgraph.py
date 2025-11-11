@@ -21,7 +21,7 @@ from pinecone import Pinecone, ServerlessSpec
 from llama_index.llms.ollama import Ollama
 
 from langgraph.graph import StateGraph, START, END
-
+from ..prompts.finance_prompt import finance_prompt
 load_dotenv()
 
 FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_FINANCIAL", "backend/financial_files")
@@ -406,29 +406,9 @@ class FinancialRAGSystem:
             ctx.logger.info("=" * 60)
 
             # Build financial analysis query
-            financial_query = f"""
-            FINANCIAL RISK ANALYSIS: {supplier_name} ({industry})
+            financial_query = finance_prompt(supplier_name, industry)
             
-            Score 0-100 (higher=lower risk): 80-100 minimal risks | 60-79 moderate | 40-59 significant | 0-39 high
             
-            Evaluate:
-            - Tariffs/import costs
-            - Inflation trends
-            - Currency exchange risks
-            - Economic stability
-            - Trade restrictions
-            - Cost predictability
-            
-            Provide:
-            1. Score (0-100)
-            2. Brief summary (2-3 sentences): operating costs, tariffs, inflation, currency risks
-            3. Risk factors list or "minimal risks"
-            
-            Response format:
-            FINANCIAL_SCORE: [number]
-            FINANCIAL_DETAILS: [summary]
-            RISK_FACTORS: [list or "minimal risks"]
-            """
 
             ctx.logger.info(
                 f"Analyzing financial risks for {supplier_name} (LLM: {self.llm_type})"
