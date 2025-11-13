@@ -22,6 +22,7 @@ from backend.test_func import (
     validate_response_before_sending,
 )
 
+# /Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/compliance_agent.py
 load_dotenv()
 
 compliance_agent = Agent(
@@ -64,6 +65,9 @@ async def startup(ctx: Context):
     ctx.storage.set("supplier_history", [])
     ctx.storage.set("current_supplier", None)
     ctx.storage.set("previous_supplier", None)
+
+    # Track processed request IDs to prevent duplicates
+    ctx.storage.set("processed_request_ids", [])
 
     # Initialize request trace for debugging
     ctx.storage.set(
@@ -160,75 +164,86 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         )
 
     try:
-        # === LANGGRAPH WORKFLOW ===
+        # === DIRECT PROMPT-BASED ANALYSIS (BYPASSING LANGGRAPH FOR NOW) ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("RUNNING LANGGRAPH COMPLIANCE WORKFLOW")
+        ctx.logger.info("DIRECT COMPLIANCE ANALYSIS (NO LANGGRAPH/RAG)")
         ctx.logger.info("=" * 70)
 
-        # Create workflow state from request
-        workflow_state: SupplierWorkflowState = {
-            "request_id": msg.request_id,
-            "supplier_name": msg.supplier_name,
-            "company_values": msg.company_values,
-            "industry": msg.industry,
-            "product_needed": "",
-            "business_type": "",
-            "user_input": msg.company_values,
-            "compliance_score": None,
-            "ethics_info": None,
-            "sustainability_info": None,
-            "violations": [],
-            "supplier_location": None,
-            "supplier_country": None,
-            "retrieved_documents": None,
-            "rag_context": None,
-            "financial_score": None,
-            "financial_info": None,
-            "risk_score": None,
-            "risk_info": None,
-            "current_step": "started",
-            "error_message": None,
-            "should_continue": True,
-            "messages": [],
-            "timestamp": msg.timestamp,
-        }
+        # Read hardcoded file directly
+        from pathlib import Path
+        from backend.prompts.compliance_prompt import compliance_prompt
+        from llama_index.llms.ollama import Ollama
 
-        # Run the workflow
-        if compliance_workflow is None:
-            ctx.logger.warning("Workflow not initialized, using direct RAG query")
-            rag_result = await rag_system.query_compliance_documents(
-                ctx=ctx,
-                supplier_name=msg.supplier_name,
-                company_values=msg.company_values,
-                industry=msg.industry,
-            )
-            workflow_result = {
-                "compliance_score": rag_result["compliance_score"],
-                "violations": rag_result["violations"],
-                "sustainability_info": rag_result["sustainability_info"],
-                "ethics_info": rag_result["ethics_info"],
-                "current_step": (
-                    "compliance_approved"
-                    if rag_result["compliance_score"] >= 75
-                    else "compliance_rejected"
-                ),
-            }
-        else:
-            # Run the compiled LangGraph workflow
-            workflow_result = compliance_workflow.invoke(workflow_state)
+        # Go up 3 levels: compliance_agent.py -> supplier_search -> agents -> backend
+        compliance_file = (
+            Path(__file__).parent.parent.parent
+            / "compliance_files"
+            / "sunrise_sustainable.txt"
+        )
+
+        if not compliance_file.exists():
+            ctx.logger.error(f"Hardcoded compliance file not found: {compliance_file}")
+            raise FileNotFoundError(f"Compliance file missing: {compliance_file}")
+
+        # Read file content
+        with open(compliance_file, "r") as f:
+            supplier_text = f.read()
+
+        ctx.logger.info(
+            f"Loaded {len(supplier_text)} chars from {compliance_file.name}"
+        )
+
+        # Use compliance prompt
+        supplier_list = "sunrise_sustainable"
+        prompt = compliance_prompt(msg.company_values, msg.industry, supplier_list)
+
+        # Combine prompt + supplier data
+        full_query = f"{prompt}\n\nSupplier Data:\n{supplier_text[:3000]}"
+
+        # Initialize LLM (5 minute timeout for slow model)
+        llm = Ollama(model="llama3.2:1b", request_timeout=300)
+
+        ctx.logger.info("Sending query to LLM (llama3.2:1b)...")
+        llm_response = llm.complete(full_query)
+        response_text = str(llm_response)
 
         ctx.logger.info("=" * 70)
-        ctx.logger.info(f"Workflow completed: {workflow_result.get('current_step')}")
-        ctx.logger.info("=" * 70 + "\n")
+        ctx.logger.info("LLM RESPONSE:")
+        ctx.logger.info(response_text[:500])
+        ctx.logger.info("=" * 70)
 
-        # Build response based on workflow result
+        # Parse response (simple extraction)
+        compliance_score = 70.0
+        ethics_info = "Analysis complete"
+        sustainability_info = "Analysis complete"
+        violations = []
+
+        for line in response_text.split("\n"):
+            line_lower = line.lower()
+            if "combined_score:" in line_lower or "compliance_score:" in line_lower:
+                try:
+                    score_str = line.split(":")[-1].strip().split()[0]
+                    compliance_score = float(score_str)
+                    ctx.logger.info(f"Extracted compliance_score: {compliance_score}")
+                except:
+                    pass
+            elif "ethics_info:" in line_lower:
+                ethics_info = line.split(":", 1)[-1].strip()
+            elif "sustainability_info:" in line_lower:
+                sustainability_info = line.split(":", 1)[-1].strip()
+            elif "violations:" in line_lower:
+                viol_str = line.split(":", 1)[-1].strip()
+                if viol_str.lower() not in ["none", ""]:
+                    violations = [v.strip() for v in viol_str.split(",")]
+
+        # Build response
         response = ComplianceResponse(
             request_id=msg.request_id,
-            supplier_name=msg.supplier_name,
-            compliance_score=workflow_result.get("compliance_score", 0.0),
-            violations=workflow_result.get("violations", []),
-            sustainability_info=workflow_result.get("sustainability_info", "") or "",
-            ethics_info=workflow_result.get("ethics_info", "") or "",
+            supplier_name="sunrise_sustainable",
+            compliance_score=compliance_score,
+            violations=violations,
+            sustainability_info=sustainability_info,
+            ethics_info=ethics_info,
             timestamp="",
         )
 
@@ -240,7 +255,12 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         ctx.logger.info("Compliance analysis complete!")
         ctx.logger.info(f"Score: {response.compliance_score}/100")
         ctx.logger.info(f"Violations: {len(response.violations)}")
-        ctx.logger.info(f"Status: {workflow_result.get('current_step', 'unknown')}")
+
+        # Determine status based on score
+        current_step = (
+            "compliance_approved" if compliance_score >= 60 else "compliance_rejected"
+        )
+        ctx.logger.info(f"Status: {current_step}")
 
         # === STATE MANAGEMENT: Add result to current state ===
         # add current supplier info to the context storage
@@ -248,7 +268,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         current_supplier_info["violations"] = response.violations
         current_supplier_info["sustainability_info"] = response.sustainability_info
         current_supplier_info["ethics_info"] = response.ethics_info
-        current_supplier_info["current_step"] = workflow_result.get("current_step")
+        current_supplier_info["current_step"] = current_step
         ctx.storage.set("current_supplier", current_supplier_info)
 
         # === STATE MANAGEMENT: Add to history ===

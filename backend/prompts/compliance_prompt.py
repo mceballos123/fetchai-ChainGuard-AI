@@ -1,5 +1,5 @@
 def compliance_prompt(company_values, industry, supplier_list):
-    return """
+    return f"""
             YOU TASK IS TO:
             SELECT THE BEST SUPPLIER AND ANALYZE COMPLIANCE - Single Query
 

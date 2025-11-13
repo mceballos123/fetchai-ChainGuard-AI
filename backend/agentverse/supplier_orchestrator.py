@@ -14,12 +14,13 @@ from uagents_core.contrib.protocols.chat import (
     chat_protocol_spec,
 )
 
-# Import compliance, financial, risk, performance, and demand models
+# Import compliance, financial, risk, performance, demand, and logistics models
 from backend.models.compliance import ComplianceRequest, ComplianceResponse
 from backend.models.financial import FinancialRequest, FinancialResponse
 from backend.models.risk import RiskRequest, RiskResponse
 from backend.models.performance import PerformanceRequest, PerformanceResponse
 from backend.models.demand import DemandRequest, DemandResponse
+from backend.models.logistics import LogisticsRequest, LogisticsResponse
 
 # Import test utilities
 from backend.test_func import (
@@ -56,6 +57,9 @@ PERFORMANCE_AGENT_ADDRESS = os.getenv(
 DEMAND_AGENT_ADDRESS = os.getenv(
     "DEMAND_AGENT_ADDRESS",
 )
+LOGISTICS_AGENT_ADDRESS = os.getenv(
+    "LOGISTICS_AGENT_ADDRESS",
+)
 
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
@@ -72,6 +76,7 @@ async def startup(ctx: Context):
     ctx.logger.info(f"Risk Agent: {RISK_AGENT_ADDRESS}")
     ctx.logger.info(f"Performance Agent: {PERFORMANCE_AGENT_ADDRESS}")
     ctx.logger.info(f"Demand Agent: {DEMAND_AGENT_ADDRESS}")
+    ctx.logger.info(f"Logistics Agent: {LOGISTICS_AGENT_ADDRESS}")
 
     ctx.storage.set("active_sessions", {})
     ctx.storage.set("approved_suppliers", [])
@@ -181,9 +186,11 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     # Step 5: Route based on mode
     if is_monitoring_request:
-        # MONITORING MODE: Forward to Performance and Demand Agents
+        # MONITORING MODE: Forward to Performance, Demand, and Logistics Agents (ALL IN PARALLEL)
         ctx.logger.info("=" * 70)
-        ctx.logger.info("MONITORING MODE - FORWARDING TO PERFORMANCE AND DEMAND AGENTS")
+        ctx.logger.info(
+            "MONITORING MODE - FORWARDING TO PERFORMANCE, DEMAND, AND LOGISTICS AGENTS"
+        )
         ctx.logger.info("=" * 70)
 
         # Get the selected supplier (from the find_supplier phase)
@@ -211,11 +218,12 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             )
             return
 
-        # Initialize pending responses for monitoring (both performance and demand)
+        # Initialize pending responses for monitoring (all 3 monitoring agents)
         pending_responses = ctx.storage.get("pending_responses") or {}
         pending_responses[msg_id] = {
             "performance_response": None,
             "demand_response": None,
+            "logistics_response": None,
             "sender": sender,
             "user_query": user_query,
             "mode": "monitor",
@@ -239,9 +247,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             ctx.logger.info(f"PerformanceRequest sent to Performance Agent")
 
             # Send to Demand Agent with the selected supplier
-            ctx.logger.info(
-                f"Sending to Demand Agent: {DEMAND_AGENT_ADDRESS}"
-            )
+            ctx.logger.info(f"Sending to Demand Agent: {DEMAND_AGENT_ADDRESS}")
             ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
             demand_request = DemandRequest(
                 request_id=msg_id,
@@ -252,8 +258,23 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
             await ctx.send(DEMAND_AGENT_ADDRESS, demand_request)
 
             ctx.logger.info(f"DemandRequest sent to Demand Agent")
+
+            # Send to Logistics Agent with the selected supplier
+            ctx.logger.info(f"Sending to Logistics Agent: {LOGISTICS_AGENT_ADDRESS}")
+            ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
+            logistics_request = LogisticsRequest(
+                request_id=msg_id,
+                supplier_name=selected_supplier,
+                timestamp="",
+            )
+
+            await ctx.send(LOGISTICS_AGENT_ADDRESS, logistics_request)
+
+            ctx.logger.info(f"LogisticsRequest sent to Logistics Agent")
             ctx.logger.info("=" * 70)
-            ctx.logger.info("WAITING FOR PERFORMANCE AND DEMAND RESPONSES...")
+            ctx.logger.info(
+                "WAITING FOR PERFORMANCE, DEMAND, AND LOGISTICS RESPONSES..."
+            )
             ctx.logger.info("=" * 70)
 
         except Exception as e:
@@ -285,9 +306,9 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
         return
 
-    # Step 6: FIND SUPPLIER MODE - Forward to ALL THREE Agents (Compliance, Financial, Risk)
+    # Step 6: FIND SUPPLIER MODE - Forward to all 3 agents in parallel
     ctx.logger.info("=" * 70)
-    ctx.logger.info("FORWARDING TO ALL THREE AGENTS")
+    ctx.logger.info("FORWARDING TO COMPLIANCE, FINANCIAL, AND RISK AGENTS")
     ctx.logger.info("=" * 70)
 
     # Initialize pending responses tracking for this request
@@ -298,18 +319,16 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         "risk_response": None,
         "sender": sender,
         "user_query": user_query,
+        "mode": "find",
     }
     ctx.storage.set("pending_responses", pending_responses)
-
-    # Store the user query as the supplier being evaluated (will be updated once selected)
-    ctx.storage.set("current_evaluation_supplier", user_query)
 
     try:
         # Send to Compliance Agent
         ctx.logger.info(f"Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
         compliance_request = ComplianceRequest(
             request_id=msg_id,
-            supplier_name=user_query,
+            supplier_name="sunrise_sustainable",
             industry="general",
             company_values=user_query,
             timestamp="",
@@ -340,14 +359,13 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         ctx.logger.info(f"Sending to Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
         financial_request = FinancialRequest(
             request_id=msg_id,
-            supplier_name=user_query,
+            supplier_name="sunrise_sustainable",
             industry="general",
             timestamp="",
         )
 
         await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
 
-        # Log transmission
         log_message_transmission(
             ctx,
             "SENT",
@@ -361,18 +379,17 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
         ctx.logger.info(f"FinancialRequest sent to Financial Agent")
 
-        # Send to Risk Management Agent
+        # Send to Risk Agent
         ctx.logger.info(f"Sending to Risk Agent: {RISK_AGENT_ADDRESS}")
         risk_request = RiskRequest(
             request_id=msg_id,
-            supplier_name=user_query,
+            supplier_name="sunrise_sustainable",
             industry="general",
             timestamp="",
         )
 
         await ctx.send(RISK_AGENT_ADDRESS, risk_request)
 
-        # Log transmission
         log_message_transmission(
             ctx,
             "SENT",
@@ -386,7 +403,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
         ctx.logger.info(f"RiskRequest sent to Risk Agent")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("WAITING FOR ALL THREE RESPONSES...")
+        ctx.logger.info("WAITING FOR ALL RESPONSES (Compliance, Financial, Risk)...")
         ctx.logger.info("=" * 70)
 
     except Exception as e:
@@ -456,13 +473,16 @@ async def handle_compliance_response(
             return
 
         pending_responses[msg.request_id]["compliance_response"] = msg.model_dump()
+        pending_responses[msg.request_id][
+            "status"
+        ] = "compliance_received"  # Update status
         ctx.storage.set("pending_responses", pending_responses)
 
         ctx.logger.info(f"Compliance response stored")
         ctx.logger.info(f"Supplier: {msg.supplier_name}")
         ctx.logger.info(f"Score: {msg.compliance_score}/100")
 
-        # Check if we have both responses now
+        # Check if we have all three responses now
         await check_and_send_combined_response(ctx, msg.request_id)
 
     except Exception as e:
@@ -483,6 +503,9 @@ performance_protocol = Protocol(name="performance_response_protocol", version="1
 
 # Add Demand Response Protocol
 demand_protocol = Protocol(name="demand_response_protocol", version="1.0")
+
+# Add Logistics Response Protocol
+logistics_protocol = Protocol(name="logistics_response_protocol", version="1.0")
 
 
 @financial_protocol.on_message(model=FinancialResponse)
@@ -627,9 +650,9 @@ async def handle_demand_response(ctx: Context, sender: str, msg: DemandResponse)
 async def handle_performance_response(
     ctx: Context, sender: str, msg: PerformanceResponse
 ):
-    """Handle performance monitoring response and wait for demand response"""
+    """Handle performance monitoring response and wait for demand/logistics responses"""
     ctx.logger.info("=" * 60)
-    ctx.logger.info("Received Performance Monitoring Response (2/2)")
+    ctx.logger.info("Received Performance Monitoring Response (1/3)")
     ctx.logger.info("=" * 60)
 
     # Verify message received from Performance Agent
@@ -662,7 +685,7 @@ async def handle_performance_response(
         ctx.logger.info(f"Overall Risk: {msg.overall_risk_level}")
         ctx.logger.info(f"Alerts: {len(msg.alerts)}")
 
-        # Check if we have both monitoring responses now
+        # Check if we have all monitoring responses now
         await check_and_send_monitoring_response(ctx, msg.request_id)
 
     except Exception as e:
@@ -672,8 +695,57 @@ async def handle_performance_response(
         traceback.print_exc()
 
 
+@logistics_protocol.on_message(model=LogisticsResponse)
+async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsResponse):
+    """Handle logistics monitoring response and wait for all responses"""
+    ctx.logger.info("=" * 60)
+    ctx.logger.info("Received Logistics Monitoring Response (3/3)")
+    ctx.logger.info("=" * 60)
+
+    # Verify message received from Logistics Agent
+    log_message_transmission(
+        ctx,
+        "RECEIVED",
+        "LogisticsResponse",
+        msg.request_id,
+        {
+            "supplier_name": msg.supplier_name,
+            "overall_logistics_status": msg.overall_logistics_status,
+        },
+    )
+
+    try:
+        # Store logistics response in pending_responses
+        pending_responses = ctx.storage.get("pending_responses") or {}
+
+        if msg.request_id not in pending_responses:
+            ctx.logger.warning(
+                f"No pending response tracking for request {msg.request_id}"
+            )
+            return
+
+        pending_responses[msg.request_id]["logistics_response"] = msg.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
+
+        ctx.logger.info(f"Logistics response stored")
+        ctx.logger.info(f"Supplier: {msg.supplier_name}")
+        ctx.logger.info(f"Current Inventory: {msg.current_inventory_level}")
+        ctx.logger.info(f"Predicted Inventory: {msg.predicted_inventory_level}")
+        ctx.logger.info(f"Overall Logistics Status: {msg.overall_logistics_status}")
+        ctx.logger.info(f"Alerts: {len(msg.alerts)}")
+
+        # Check if we have all monitoring responses now
+        await check_and_send_monitoring_response(ctx, msg.request_id)
+
+    except Exception as e:
+        ctx.logger.error(f"Error handling logistics response: {e}")
+        import traceback
+
+        traceback.print_exc()
+
+
 async def check_and_send_monitoring_response(ctx: Context, request_id: str):
-    """Check if both monitoring responses are received, combine them, and send to user"""
+    """Check if all 3 monitoring responses are received, combine them, and send to user"""
     pending_responses = ctx.storage.get("pending_responses") or {}
 
     if request_id not in pending_responses:
@@ -683,19 +755,25 @@ async def check_and_send_monitoring_response(ctx: Context, request_id: str):
     response_data = pending_responses[request_id]
     performance_response = response_data.get("performance_response")
     demand_response = response_data.get("demand_response")
+    logistics_response = response_data.get("logistics_response")
 
-    # Check if we have BOTH monitoring responses
-    if performance_response is None or demand_response is None:
+    # Check if we have ALL THREE monitoring responses
+    if (
+        performance_response is None
+        or demand_response is None
+        or logistics_response is None
+    ):
         ctx.logger.info(f"Still waiting for monitoring responses...")
         ctx.logger.info(
             f"Performance: {'RECEIVED' if performance_response else 'PENDING'}"
         )
         ctx.logger.info(f"Demand: {'RECEIVED' if demand_response else 'PENDING'}")
+        ctx.logger.info(f"Logistics: {'RECEIVED' if logistics_response else 'PENDING'}")
         return
 
-    # We have both responses! Combine them
+    # We have all three responses! Combine them
     ctx.logger.info("=" * 70)
-    ctx.logger.info("ALL MONITORING RESPONSES RECEIVED - COMBINING RESULTS")
+    ctx.logger.info("ALL 3 MONITORING RESPONSES RECEIVED - COMBINING RESULTS")
     ctx.logger.info("=" * 70)
 
     user_sender = response_data.get("sender")
@@ -721,12 +799,21 @@ async def check_and_send_monitoring_response(ctx: Context, request_id: str):
     else:
         demand_alerts_text = "  • No active alerts"
 
+    logistics_alerts_text = ""
+    if logistics_response.get("alerts"):
+        logistics_alerts_text = "\n".join(
+            [f"  • {alert}" for alert in logistics_response.get("alerts", [])]
+        )
+    else:
+        logistics_alerts_text = "  • No active alerts"
+
     response_text = f"""
 SUPPLIER MONITORING UPDATE
 
 Supplier: {performance_response.get('supplier_name', 'N/A')}
 Overall Risk Level: {performance_response.get('overall_risk_level', 'N/A')}
 Overall Performance: {demand_response.get('overall_performance', 'N/A')}
+Logistics Status: {logistics_response.get('overall_logistics_status', 'N/A')}
 
 ===== EXTERNAL FACTORS (PERFORMANCE MONITORING) =====
 
@@ -780,9 +867,34 @@ Status: {demand_response.get('quality_status', 'N/A')}
 DEMAND ALERTS ({len(demand_response.get('alerts', []))})
 {demand_alerts_text}
 
+===== INVENTORY & LOGISTICS MANAGEMENT =====
+
+CURRENT INVENTORY LEVEL
+Status: {logistics_response.get('current_inventory_level', 'N/A')}
+Current Units: {logistics_response.get('current_inventory_units', 0)}
+{logistics_response.get('inventory_details', 'N/A')}
+
 ---
 
-This comprehensive monitoring update combines external factors and operational metrics to give you a complete view of your supplier's performance. Request another update anytime to see the latest conditions.
+INVENTORY FORECAST
+Predicted Level: {logistics_response.get('predicted_inventory_level', 'N/A')}
+Predicted Units: {logistics_response.get('predicted_inventory_units', 0)}
+{logistics_response.get('inventory_forecast', 'N/A')}
+
+---
+
+RESTOCKING STATUS
+Status: {logistics_response.get('restocking_status', 'N/A')}
+{logistics_response.get('restocking_details', 'N/A')}
+
+---
+
+LOGISTICS ALERTS ({len(logistics_response.get('alerts', []))})
+{logistics_alerts_text}
+
+---
+
+This comprehensive 24/7 monitoring update combines external factors, operational metrics, and inventory management to give you a complete view of your supplier's performance. Request another update anytime to see the latest conditions.
     """
 
     # Send combined monitoring response back to user
@@ -815,8 +927,9 @@ This comprehensive monitoring update combines external factors and operational m
     ctx.logger.info(
         f"Risk Level: {performance_response.get('overall_risk_level', 'N/A')}"
     )
+    ctx.logger.info(f"Performance: {demand_response.get('overall_performance', 'N/A')}")
     ctx.logger.info(
-        f"Performance: {demand_response.get('overall_performance', 'N/A')}"
+        f"Logistics Status: {logistics_response.get('overall_logistics_status', 'N/A')}"
     )
 
     # Clean up session and pending responses
