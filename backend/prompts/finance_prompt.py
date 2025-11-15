@@ -1,5 +1,5 @@
 def finance_prompt(supplier_name, industry):
-    return """
+    return f"""
             YOU TASK IS TO:
             Analyze the financial risk of the supplier {supplier_name} in the industry {industry} and score it from 0-100:
             - 75 to 100 minimal risks

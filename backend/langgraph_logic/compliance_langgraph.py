@@ -72,7 +72,7 @@ class ComplianceRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=600)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=10)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings
@@ -116,48 +116,37 @@ class ComplianceRAGSystem:
             return False
 
     async def _load_compliance_files(self, ctx: Context) -> bool:
-        """Load compliance files from directory with validation"""
+        """Load only sunrise_sustainable compliance file"""
         try:
-            # Validate path exists
-            if not COMPLIANCE_FILES_DIR.exists():
-                ctx.logger.error(
-                    f"Compliance files directory not found: {COMPLIANCE_FILES_DIR}"
-                )
-                ctx.logger.error(f"Current working directory: {Path.cwd()}")
-                ctx.logger.error(
-                    f"Expected 5 compliance files in: {COMPLIANCE_FILES_DIR}"
-                )
+            # Load only the sunrise_sustainable file
+            file_path = COMPLIANCE_FILES_DIR / "sunrise_sustainable.txt"
+
+            if not file_path.exists():
+                ctx.logger.error(f"Compliance file not found: {file_path}")
                 return False
 
-            # List files before loading
-            files_in_dir = list(COMPLIANCE_FILES_DIR.glob("*.txt"))
-            ctx.logger.info(f"Files found in directory: {len(files_in_dir)}")
-            for f in files_in_dir:
-                ctx.logger.info(f"   - {f.name}")
+            ctx.logger.info(f"Loading compliance file: {file_path.name}")
 
-            # Use LlamaIndex to load documents
-            reader = SimpleDirectoryReader(str(COMPLIANCE_FILES_DIR))
-            self.documents = reader.load_data()
+            # Use LlamaIndex to load the single document
+            reader = SimpleDirectoryReader(
+                str(COMPLIANCE_FILES_DIR), required_exts=[".txt"]
+            )
+            all_documents = reader.load_data()
 
-            # Validation checks
+            # Filter to only sunrise_sustainable
+            self.documents = [
+                doc
+                for doc in all_documents
+                if "sunrise_sustainable" in doc.metadata.get("file_name", "").lower()
+            ]
+
             if not self.documents:
-                ctx.logger.error("No documents found in compliance_files folder")
+                ctx.logger.error("Could not load sunrise_sustainable compliance file")
                 return False
-
-            # Ensure we have all 5 expected documents
-            expected_count = 5
-            if len(self.documents) < expected_count:
-                ctx.logger.warning(
-                    f"Only loaded {len(self.documents)} documents, expected {expected_count}"
-                )
 
             ctx.logger.info(
-                f"Successfully loaded {len(self.documents)} compliance documents"
+                f"Successfully loaded compliance document for sunrise_sustainable"
             )
-            for i, doc in enumerate(self.documents, 1):
-                file_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"   {i}. {file_name}")
-
             return True
 
         except Exception as e:
@@ -286,9 +275,7 @@ class ComplianceRAGSystem:
                     ctx.logger.info(f"EXCLUDED: {doc_file_name}")
 
             if not filtered_docs:
-                ctx.logger.error(
-                    f"No documents found for supplier: '{supplier_name}'"
-                )
+                ctx.logger.error(f"No documents found for supplier: '{supplier_name}'")
                 ctx.logger.error(f"Searched for: '{normalized_supplier}'")
                 ctx.logger.error(f"  Available files:")
                 for doc in self.documents:
@@ -335,9 +322,7 @@ class ComplianceRAGSystem:
                     spec=ServerlessSpec(cloud="aws", region="us-east-1"),
                 )
             else:
-                ctx.logger.info(
-                    f"Using existing Pinecone index: {PINECONE_INDEX_NAME}"
-                )
+                ctx.logger.info(f"Using existing Pinecone index: {PINECONE_INDEX_NAME}")
 
             # Get Pinecone index
             pinecone_index = pc.Index(PINECONE_INDEX_NAME)
@@ -348,9 +333,9 @@ class ComplianceRAGSystem:
             # Create index from vector store
             self.index = VectorStoreIndex.from_vector_store(vector_store)
 
-            # Create query engine with tree summarize
+            # Create query engine with compact mode (faster than tree_summarize)
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=5, response_mode="tree_summarize", verbose=True
+                similarity_top_k=1, response_mode="compact", verbose=True
             )
 
             ctx.logger.info("Pinecone vector store initialized")
@@ -460,20 +445,21 @@ class ComplianceRAGSystem:
             ctx.logger.info("SUPPLIER SELECTION + COMPLIANCE ANALYSIS (COMBINED)")
             ctx.logger.info("=" * 60)
 
-            # Build combined query for supplier selection + compliance analysis
-            supplier_list = "\n".join(
-                [
-                    f"- {doc.metadata.get('file_name', 'Unknown').replace('.txt', '')}"
-                    for doc in self.documents
-                ]
-            )
+            # For single hardcoded file, read directly instead of using RAG
+            # This bypasses the slow RAG query
+            supplier_text = ""
+            for doc in self.documents:
+                supplier_text += doc.text + "\n\n"
+
+            supplier_list = "sunrise_sustainable"  # Hardcoded for now
 
             combined_query = compliance_prompt(company_values, industry, supplier_list)
 
-            ctx.logger.info("Executing combined query...")
+            ctx.logger.info("Executing direct LLM query (NO RAG)...")
 
-            # Single LLM query for both supplier selection AND compliance analysis
-            response = self.query_engine.query(combined_query)
+            # Use simple LLM predict instead of full RAG query
+            simple_query = f"{combined_query}\n\nSupplier Data:\n{supplier_text[:3000]}"  # Limit to 3000 chars
+            response = self.llm.complete(simple_query)
             response_text = str(response)
 
             # Parse response to extract supplier name and compliance data
@@ -613,9 +599,7 @@ class ComplianceRAGSystem:
 
                     if content:
                         ethics_info = content
-                        ctx.logger.info(
-                            f"Extracted ETHICS_INFO: {ethics_info[:60]}..."
-                        )
+                        ctx.logger.info(f"Extracted ETHICS_INFO: {ethics_info[:60]}...")
 
                 elif "sustainability_info:" in line_lower:
                     # Extract content after "sustainability_info:"
@@ -664,9 +648,7 @@ class ComplianceRAGSystem:
                     )
                     if ethics_section:
                         ethics_info = ethics_section
-                        ctx.logger.info(
-                            f"Fallback ETHICS_INFO: {ethics_info[:60]}..."
-                        )
+                        ctx.logger.info(f"Fallback ETHICS_INFO: {ethics_info[:60]}...")
 
             if sustainability_info == "Insufficient data":
                 ctx.logger.info(

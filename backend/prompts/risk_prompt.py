@@ -1,5 +1,5 @@
 def risk_prompt(supplier_name, industry):
-    return """
+    return f"""
             YOU TASK IS TO:
             Analyze the risk management of the supplier {supplier_name} in the industry {industry} and score it from 0-100:
             

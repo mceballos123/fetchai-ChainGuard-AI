@@ -14,16 +14,14 @@ Primary Market: United States & Europe
 US Import Tariff Rate (Coffee): 0% (zero tariff on unroasted coffee beans)
 EU Import Tariff Rate: 0% (GSP preferential agreement with Peru)
 Country of Origin: Peru
+
 Trade Agreements:
-  • Peru-United States Free Trade Agreement (PTFTA)
-  • EU Generalized System of Preferences (GSP)
-  • Regenerative Organic Certified (ROC) channels
+• Peru-United States Free Trade Agreement (PTFTA)
+• EU Generalized System of Preferences (GSP)
 
 Applied Recent Tariffs:
-  • General tariff assessment: Minimal (0-2%)
-  • Logistics/transportation surcharge: $0.48/lb (remote location)
-  • Amazon conservation premium: $0.18/lb (environmental impact credit)
-  • Regenerative certification premium: $0.20/lb (specialized market)
+• General tariff assessment: Minimal (0-2%)
+• Logistics/transportation surcharge: $0.48/lb (remote location)
 
 === INFLATION RATE DATA ===
 Peru National Inflation Rate (2024): 2.9%
@@ -32,119 +30,30 @@ Currency (PEN) vs USD Exchange Rate: 1 USD = 3.7-3.9 PEN
 Currency Stability: Moderate (±1.2% volatility)
 Projected Inflation (2025): 2.5%
 
-=== COMMODITY PRICE FLUCTUATION ===
-Current Arabica Price Index: 182 (ICE Futures)
-12-Month Range: 160-200 USD/50lb bag
-Volatility Factor: Medium
-Price Trend: Stable with slight upward bias
-Regenerative Organic Premium: +18-25% above commodity price
-Agroforestry Blends: +12-20% premium
-
 === FINANCIAL RISK ASSESSMENT ===
 Overall Risk Score: 35/100 (MODERATE-LOW RISK)
 Risk Categories:
-  • Currency Risk: Low-Moderate (PEN stable vs USD, some volatility)
-  • Credit Risk: Low (reliable payment from international buyers)
-  • Commodity Risk: Medium (premium products have more stable pricing)
-  • Geopolitical Risk: Moderate (Peru has some political uncertainties)
-  • Supply Chain Risk: Low-Moderate (remote location, but established routes)
-  • Inflation Impact: Low (economy relatively stable)
+• Currency Risk: Low-Moderate (PEN stable vs USD, some volatility)
+• Credit Risk: Low (reliable payment from international buyers)
+• Commodity Risk: Medium (premium products have more stable pricing)
+• Geopolitical Risk: Moderate (Peru has some political uncertainties)
+• Supply Chain Risk: Low-Moderate (remote location, but established routes)
 
 === OPERATIONAL COSTS ===
 Average Monthly Operating Costs: $95K USD
 Labor Costs (% of revenue): 32%
 Transportation Costs (remote regions): $32K/month average
-Agroforestry Management & Processing: $22K/month
-Facilities & Utilities: $12K/month
-Indigenous Community Programs: $8K/month
 
-=== FINANCIAL PROJECTIONS ===
-Q1 2025 Projected Revenue: $420K
-Q1 2025 Projected Net Income: $54K
-Expected Growth Rate: 11% YoY
-Planned Capital Investments: $280K (solar dehydrators, processing, carbon offset)
-
-=== FINANCING STATUS ===
-Current Debt Outstanding: $350K
-Debt Maturity: 3 years remaining
-Interest Rate: 7.8%
-Available Credit Line: $300K
-Utilization: 54%
-
-=== PAYMENT TERMS & CONDITIONS ===
+=== PAYMENT TERMS ===
 Standard Payment Terms: Net 45-60 days
 Early Payment Discount: 2.5% for payment within 20 days
-Payment Methods: Wire transfer, Trade finance, Blockchain settlement
-Average Days Sales Outstanding (DSO): 52 days
 Payment Default History: 0 incidents in past 3 years
-
-=== SUSTAINABILITY & AGROFORESTRY INVESTMENT ===
-Annual Investment in Sustainability: $280K
-Carbon Sequestration: 3 tons CO2e per acre annually
-ROI on Sustainability Projects: 11%
-Impact:
-  • Premium pricing (12-25%) for certified regenerative products
-  • Carbon credits sales potential: $45K annually
-  • Agroforestry biodiversity attracts specialty buyers
-  • Indigenous land rights protection creates reputational value
-
-Agroforestry System Value:
-  • Annual timber/hardwood production: $120K
-  • Secondary fruit crops: $85K
-  • Native forest preservation value: Priceless
-
-=== MARKET POSITION ===
-Market Share (Peruvian Coffee): 9%
-Customer Base: 40+ international partners (many regenerative specialty buyers)
-Concentration Risk: Top 2 customers = 38% of revenue
-Customer Retention Rate: 91%
-Market Segment Leader: Regenerative Organic Certified coffee (specialty segment)
-
-=== INDIGENOUS PARTNERSHIPS ===
-Farming Communities Partnered: 15+ Amazonian communities
-Indigenous Land Rights: 100% protected through partnership agreements
-Revenue Sharing Model: Communities receive 10% equity stake
-Cultural Preservation Programs: Documented traditional knowledge
-Quechua Language Programs: Bilingual education initiative
-
-Workers by Category:
-  • Indigenous farmers: 180+
-  • Processing staff: 25
-  • Management: 8 (60% indigenous, 40% international)
-  • Seasonal labor: 50-100 (depending on harvest)
 
 === CERTIFICATIONS & PREMIUMS ===
 USDA Organic Certification: $0.20/lb premium
 Fair Trade Certified: $0.25/lb premium
 Regenerative Organic Certified (ROC): $0.25/lb premium
-UTZ Certified: $0.10/lb premium
-Combined certification value: $0.80/lb above commodity
-
-Carbon Neutral Certification: $0.15/lb premium
-Indigenous-Sourced Label: $0.12/lb premium
-
-=== EXCHANGE RATE & HEDGING ===
-PEN/USD Historical Rate: 1 USD = 3.5 PEN (2021) → 3.8 PEN (2024)
-Impact: Favorable for exports (devaluation increases competitiveness)
-Forward Contracts: Available through Peruvian banks
-Hedging strategy: Conservative, focus on local cost management
 
 === RECOMMENDATIONS ===
 ✓ APPROVED FOR PARTNERSHIP
-Rationale: Sunrise Sustainable Imports offers strong financial stability combined
-with exceptional environmental and indigenous community impact. Moderate financial
-risk profile is well-managed through premium product positioning and diversified
-revenue streams. Recommend:
-  • Standard terms with consideration for longer payment windows (Net 60 acceptable)
-  • Volume discounts for long-term partnerships (3+ years)
-  • Feature regenerative and indigenous-sourced positioning
-  • Support carbon credit monetization initiatives
-  • Consider co-investment in agroforestry expansion
-  • Explore partnership on educational initiatives
-
-Their agroforestry model creates natural hedge against climate risks while
-generating exceptional environmental impact. Premium market positioning provides
-financial stability despite commodity price volatility.
-
-Last Updated: October 2024
-Prepared by: Financial Analysis Unit
+Rationale: Strong financial stability with exceptional environmental and indigenous community impact. Moderate financial risk well-managed through premium product positioning.

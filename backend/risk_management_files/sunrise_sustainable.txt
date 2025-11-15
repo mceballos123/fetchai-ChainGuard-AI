@@ -1,118 +1,38 @@
 RISK MANAGEMENT PROFILE: Sunrise Sustainable
 
 SUPPLIER OVERVIEW:
-Sunrise Sustainable is a vertically integrated renewable energy equipment and materials manufacturer based in Morocco, producing solar panels, wind turbine components, and energy storage systems. Operates manufacturing facilities and distribution centers across North Africa.
+Sunrise Sustainable is a vertically integrated renewable energy equipment manufacturer based in Morocco, producing solar panels, wind turbine components, and energy storage systems.
 
 CAPACITY CONSTRAINTS:
 - Current Production Capacity: 150 MW equivalent components/month, operating at 70% utilization
-- Seasonal Demand: Peak season (March-August) drives 60% of annual revenue; winter demand drops 50%
+- Seasonal Demand: Peak season (March-August) drives 60% of annual revenue
 - Manufacturing Facility Constraints: Single automated facility at capacity; expansion would take 18-24 months
-- Quality Testing Bottleneck: Lab testing capacity limits large batch certifications to 2-3 batches/month
 - Raw Material Processing: Chemical processing for panel materials creates bottleneck; 3-4 week lead times
 - Inventory Management: Warehouse capacity 500 units; seasonal demand creates stockpile challenges
-- Workforce Capacity: 120 skilled workers; recruiting and training new staff takes 6-8 months
 
 NATURAL DISASTER RISKS:
-- Flooding Risk: Located in region with seasonal flooding; facility on elevated site but surrounding area at risk
-- Sand Storms: Saharan dust storms affect operations March-May; damage to equipment and air quality issues
-- Extreme Heat: Temperatures exceed 45°C (113°F) regularly; cooling system failures possible
-- Water Scarcity: Arid climate; water availability for manufacturing processes increasingly uncertain
-- Coastal Erosion: Distribution center near Mediterranean coast; long-term sea level rise concerns
-- Electrical Storms: Seasonal thunderstorms during spring months; power surges risk to electronics manufacturing
-- Drought: Prolonged drought affects water supply and agricultural sector (customer base affected)
-
-SUPPLY CHAIN RISKS:
-- Raw Material Sourcing: Silicon and rare earth materials sourced from limited suppliers; geopolitical risk
-- Import Dependency: 70% of raw materials imported; customs delays 1-3 weeks possible
-- Energy Supply: Manufacturing energy-intensive; local grid sometimes unstable (blackouts 2-4 hours/week)
-- Chemical Sourcing: Specialized chemicals for solar panel production from Europe; lead time 4-6 weeks
-- Logistics Partners: Limited high-reliability trucking options; subcontractors have variable performance
-- Port Access: 150km to nearest port; border crossing into Europe adds complexity
+- Flooding Risk: Located in region with seasonal flooding
+- Sand Storms: Saharan dust storms affect operations March-May
+- Extreme Heat: Temperatures exceed 45°C regularly; cooling system failures possible
+- Water Scarcity: Arid climate; water availability for manufacturing increasingly uncertain
 
 LOGISTICS & ACCESSIBILITY:
-- Location Accessibility: Decent road infrastructure; main highway connects to Europe via Spain
 - Port Access: 150km to Mediterranean ports; shipping to Europe 3-5 days, North America 10-14 days
 - Road Infrastructure: Recently upgraded, but political issues could impact trade routes
-- Shipping Reliability: Regular shipping routes established; container availability sometimes limited
-- Customs Clearance: EU export procedures straightforward; Morocco-EU trade agreement facilitates
-- Trucking Availability: Local trucking companies reliable; international shipping partners available
 - Transportation Costs: Moderate costs; fuel price volatility affects bottom line 5-8% quarterly
 
-MANUFACTURING RISKS:
-- Equipment Reliability: Manufacturing equipment average age 7 years; specialized solar equipment hard to repair
-- Production Scheduling: Long lead times on raw materials make demand forecasting challenging
-- Quality Consistency: Small variations in solar cell production affect efficiency ratings
-- Workforce Training: Continuous training needed for new equipment; skill gaps possible
-- Process Efficiency: Energy-intensive manufacturing; inefficiencies directly impact profitability
-
-OPERATIONAL RISKS:
-- Technology Obsolescence: Solar/wind technology evolving rapidly; product lines may become outdated
-- Research & Development: R&D investment substantial; failed projects impact profitability
-- Regulatory Compliance: European environmental standards strict; ongoing compliance costs increasing
-- Product Certification: Multiple international certifications required; recertification cycles 2-3 years
-- Warranty Obligations: 20-year product warranties create long-term liability exposure
-- Testing Standards: International testing standards evolving; equipment upgrades expensive
-
-MARKET & REPUTATIONAL RISKS:
-- Market Volatility: Renewable energy market growing but competition intense; pricing pressure 10-15% annually
-- Customer Concentration: Top 5 industrial customers represent 55% of revenue; customer loss critical
-- Technology Risk: Competitors developing competing technologies; market displacement possible
-- Supply Chain Transparency: Pressure to disclose supply chain and labor practices; audit requirements increasing
-- ESG Scrutiny: Despite green credentials, supply chain practices under scrutiny; reputational risk exists
-- Greenwashing Accusations: Sustainability claims must be substantiated; marketing claims must be accurate
-
 FINANCIAL RISKS:
-- Commodity Price Volatility: Silicon prices fluctuate 20-25% annually; margins compressed
+- Commodity Price Volatility: Silicon prices fluctuate 20-25% annually
 - Currency Risk: Export revenue in EUR and USD; Moroccan Dirham fluctuations 8-12% quarterly
-- Capital Requirements: Manufacturing expansion requires significant investment; limited access to financing
 - Working Capital: Seasonal revenue creates cash flow challenges September-February
-- Debt Obligations: 40% debt-to-equity ratio; expansion plans increase debt load further
-- Profitability Pressure: Renewable energy industry margins compressed (8-12%); little room for inefficiency
+- Debt Obligations: 40% debt-to-equity ratio
 
-REGULATORY & COMPLIANCE RISKS:
-- Moroccan Labor Laws: Labor cost pressures increasing 6-8% annually
-- Export Regulations: EU trade rules changing; potential tariffs on imports from Morocco
-- Environmental Standards: Moroccan environmental ministry tightening standards; compliance costs rising
-- Tax Regulations: Transfer pricing scrutiny from Moroccan tax authorities; compliance complex
-- Safety Standards: Workplace safety regulations requiring ongoing facility upgrades
-
-MARKET ACCESS RISKS:
-- EU Import Tariffs: Solar panel import tariffs could be imposed; would impact European customer pricing
-- US Market Access: Limited presence in US market; tariff barriers to exports
-- Chinese Competition: Chinese solar manufacturers aggressively pricing; margin pressure from competition
-- Trade Agreements: USMCA and other trade agreements creating uncertainty
-- Subsidies Dependence: Customer purchasing driven by government subsidies; subsidy reductions risk
-
-GEOGRAPHIC & GEOPOLITICAL RISKS:
-- Political Instability: Morocco relatively stable, but regional tensions could affect operations
-- Border Security: Spanish border crossing requires compliance with EU security standards
-- Trade Relationships: EU-Morocco trade agreement stable but subject to revision
-- Regional Conflicts: Occasional tensions between Morocco and Algeria affect business confidence
-
-PERSONNEL & ORGANIZATIONAL RISKS:
-- Brain Drain: Skilled technicians attracted to European opportunities; retention challenging
-- Management Experience: Limited experience with rapid scaling; execution risk in growth plans
-- Organizational Structure: Rapidly growing company; organizational challenges with scaling
-- Knowledge Transfer: Key personnel concentration; loss could disrupt operations
-- Training Programs: Limited local training infrastructure; external recruitment expensive
-
-ENVIRONMENTAL IMPACT RISKS:
-- Manufacturing Waste: Chemical waste from manufacturing requires proper handling; regulatory oversight
-- Water Usage: Manufacturing water-intensive; scarcity issues in arid region
-- Carbon Footprint: Manufacturing energy-intensive; carbon tax exposure possible as Morocco implements climate policies
-- Recycling Programs: Limited recycling infrastructure; end-of-life product management challenging
-- Regulatory Pressure: Increasing pressure for environmental stewardship; compliance costs rising
+MARKET RISKS:
+- Customer Concentration: Top 5 customers represent 55% of revenue; customer loss critical
+- Chinese Competition: Aggressive pricing creates margin pressure
 
 RECOMMENDATIONS:
-1. Diversify customer base to reduce dependency on top 5 industrial customers
-2. Establish strategic partnerships with European manufacturers to expand market reach
-3. Invest in manufacturing automation to increase production capacity and consistency
-4. Develop supply chain redundancy for critical raw materials (silicon, rare earths)
-5. Build emergency energy reserves or alternative power sources to address grid instability
-6. Implement comprehensive risk management program for supply chain disruptions
-7. Establish R&D partnerships with universities to stay competitive in technology evolution
-8. Develop contingency supply agreements with alternative suppliers in Europe and Asia
-9. Build cash reserves (6-month operating costs) to weather seasonal demand variations
-10. Implement water conservation and recycling programs to address scarcity issues
-11. Establish contingency manufacturing partnerships for capacity expansion
-12. Develop strong ESG reporting and transparency programs to address investor concerns
+1. Diversify customer base
+2. Establish strategic partnerships with European manufacturers
+3. Develop supply chain redundancy for critical raw materials
+4. Build cash reserves to weather seasonal demand variations

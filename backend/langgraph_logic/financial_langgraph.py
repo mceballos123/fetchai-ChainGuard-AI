@@ -22,6 +22,7 @@ from llama_index.llms.ollama import Ollama
 
 from langgraph.graph import StateGraph, START, END
 from ..prompts.finance_prompt import finance_prompt
+
 load_dotenv()
 
 FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_FINANCIAL", "backend/financial_files")
@@ -73,7 +74,7 @@ class FinancialRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=600)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=10)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings
@@ -117,48 +118,37 @@ class FinancialRAGSystem:
             return False
 
     async def _load_financial_files(self, ctx: Context) -> bool:
-        """Load financial files from directory with validation"""
+        """Load only sunrise_sustainable_financial file"""
         try:
-            # Validate path exists
-            if not FINANCIAL_FILES_DIR.exists():
-                ctx.logger.error(
-                    f"Financial files directory not found: {FINANCIAL_FILES_DIR}"
-                )
-                ctx.logger.error(f"Current working directory: {Path.cwd()}")
-                ctx.logger.error(
-                    f"Expected 5 financial files in: {FINANCIAL_FILES_DIR}"
-                )
+            # Load only the sunrise_sustainable_financial file
+            file_path = FINANCIAL_FILES_DIR / "sunrise_sustainable_financial.txt"
+
+            if not file_path.exists():
+                ctx.logger.error(f"Financial file not found: {file_path}")
                 return False
 
-            # List files before loading
-            files_in_dir = list(FINANCIAL_FILES_DIR.glob("*.txt"))
-            ctx.logger.info(f"Files found in directory: {len(files_in_dir)}")
-            for f in files_in_dir:
-                ctx.logger.info(f"   - {f.name}")
+            ctx.logger.info(f"Loading financial file: {file_path.name}")
 
-            # Use LlamaIndex to load documents
-            reader = SimpleDirectoryReader(str(FINANCIAL_FILES_DIR))
-            self.documents = reader.load_data()
+            # Use LlamaIndex to load the single document
+            reader = SimpleDirectoryReader(
+                str(FINANCIAL_FILES_DIR), required_exts=[".txt"]
+            )
+            all_documents = reader.load_data()
 
-            # Validation checks
+            # Filter to only sunrise_sustainable_financial
+            self.documents = [
+                doc
+                for doc in all_documents
+                if "sunrise_sustainable" in doc.metadata.get("file_name", "").lower()
+            ]
+
             if not self.documents:
-                ctx.logger.error("No documents found in financial_files folder")
+                ctx.logger.error("Could not load sunrise_sustainable_financial file")
                 return False
-
-            # Ensure we have all 5 expected documents
-            expected_count = 5
-            if len(self.documents) < expected_count:
-                ctx.logger.warning(
-                    f"Only loaded {len(self.documents)} documents, expected {expected_count}"
-                )
 
             ctx.logger.info(
-                f"Loaded {len(self.documents)} financial documents"
+                f"Successfully loaded financial document for sunrise_sustainable"
             )
-            for i, doc in enumerate(self.documents, 1):
-                file_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"   {i}. {file_name}")
-
             return True
 
         except Exception as e:
@@ -204,7 +194,9 @@ class FinancialRAGSystem:
                     normalized_supplier == doc_file_name.replace("_", " ")
                     or normalized_supplier in doc_file_name.replace("_", " ")
                     or doc_file_name.replace("_", " ") in normalized_supplier
-                    or any(word in doc_file_name for word in normalized_supplier.split())
+                    or any(
+                        word in doc_file_name for word in normalized_supplier.split()
+                    )
                 ):
                     filtered_docs.append(doc)
 
@@ -272,9 +264,9 @@ class FinancialRAGSystem:
             # Create index from vector store
             self.index = VectorStoreIndex.from_vector_store(vector_store)
 
-            # Create query engine with tree summarize
+            # Create query engine with compact mode (faster than tree_summarize)
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=5, response_mode="tree_summarize", verbose=True
+                similarity_top_k=1, response_mode="compact", verbose=True
             )
 
             ctx.logger.info("Pinecone vector store initialized for financial data")
@@ -297,21 +289,30 @@ class FinancialRAGSystem:
             try:
                 # Get the Pinecone index stats to check if it has vectors
                 from pinecone import Pinecone
+
                 pinecone_api_key = os.getenv("PINECONE_API_KEY")
                 pc = Pinecone(api_key=pinecone_api_key)
                 pinecone_index = pc.Index(PINECONE_INDEX_NAME_FINANCIAL)
                 stats = pinecone_index.describe_index_stats()
-                
-                total_vectors = stats.get('total_vector_count', 0)
-                
+
+                total_vectors = stats.get("total_vector_count", 0)
+
                 if total_vectors > 0:
-                    ctx.logger.info(f"Pinecone financial index already contains {total_vectors} vectors")
-                    ctx.logger.info("Skipping document indexing (financial documents already in vector DB)")
+                    ctx.logger.info(
+                        f"Pinecone financial index already contains {total_vectors} vectors"
+                    )
+                    ctx.logger.info(
+                        "Skipping document indexing (financial documents already in vector DB)"
+                    )
                     return True
                 else:
-                    ctx.logger.info("Pinecone financial index is empty, proceeding with document indexing...")
+                    ctx.logger.info(
+                        "Pinecone financial index is empty, proceeding with document indexing..."
+                    )
             except Exception as e:
-                ctx.logger.warning(f"Could not check financial index stats: {e}, proceeding with indexing...")
+                ctx.logger.warning(
+                    f"Could not check financial index stats: {e}, proceeding with indexing..."
+                )
 
             # Parse documents into nodes (chunks)
             parser = SimpleNodeParser.from_defaults(
@@ -387,15 +388,20 @@ class FinancialRAGSystem:
 
             # Build financial analysis query
             financial_query = finance_prompt(supplier_name, industry)
-            
-            
 
             ctx.logger.info(
                 f"Analyzing financial risks for {supplier_name} (LLM: {self.llm_type})"
             )
 
-            # Query the RAG system with ONLY the selected supplier's financial documents
-            response = self.query_engine.query(financial_query)
+            # For single hardcoded file, read directly instead of using RAG
+            # This bypasses the slow RAG query and tree_summarize process
+            supplier_text = ""
+            for doc in self.documents:
+                supplier_text += doc.text + "\n\n"
+            
+            # Use simple LLM predict instead of full RAG query
+            simple_query = f"{financial_query}\n\nSupplier Data:\n{supplier_text[:2000]}"  # Limit to 2000 chars
+            response = self.llm.complete(simple_query)
 
             # Parse the response
             result = await self._parse_rag_response(ctx, str(response), supplier_name)
@@ -605,7 +611,7 @@ class FinancialRAGSystem:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(run_async)
-                    result = future.result(timeout=600)  # 10 minute timeout
+                    result = future.result(timeout=1200)  # 20 minute timeout
                     return result
             except RuntimeError:
                 # No event loop running, use asyncio.run()
@@ -630,7 +636,7 @@ def financial_check_node(
     """
     Node 1: Run financial risk check on supplier using RAG system.
 
-    Input: supplier_name, industry
+    Input: supplier_name (pre-selected by Compliance Agent), industry
     Output: financial_score, financial_details, risk_factors
     """
     ctx.logger.info("=" * 70)
@@ -638,13 +644,12 @@ def financial_check_node(
     ctx.logger.info("=" * 70)
 
     try:
-        ctx.logger.info(
-            f"Checking financial risks for: {state.get('supplier_name', 'Unknown')}"
-        )
+        supplier_name = state.get("supplier_name", "")
+        ctx.logger.info(f"Analyzing financial risks for: {supplier_name}")
 
-        # Run RAG query for financial analysis
+        # Run RAG query for financial analysis on the provided supplier
         rag_result = rag_system.query_financial_documents_sync(
-            supplier_name=state.get("supplier_name", ""),
+            supplier_name=supplier_name,
             industry=state.get("industry", ""),
         )
 

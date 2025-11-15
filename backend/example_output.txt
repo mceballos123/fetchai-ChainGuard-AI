@@ -1,0 +1,39 @@
+the goal of the fearue is to display one name not muliple supplier, APPROVED FOR PARTNERSHIP
+
+SUPPLIER ANALYSIS REPORT
+
+Business Owner: Im a small business coffee shop owner and I want to find a supplier that matches what values I follow as a business. As a business owner I want a supplier that gets its beans from a farm that honors the farmers that retrieve the beans.
+
+Supplier Status: APPROVED
+
+Supplier Requirements: Supplier meets all requirements: compliance, financial, risk management
+
+COMPLIANCE ANALYSIS
+
+Overall Compliance Score: 85.0/100
+
+Ethics & Worker Treatment: The supplier demonstrates strong commitment to indigenous farming knowledge, documented through cultural preservation programs and bilingual education.
+
+Sustainability Practices: Agroforestry systems sequester 3 tons of carbon per acre annually and native pollinators are protected through pesticide-free farming practices. However, the company has not publicly disclosed information on its water management practices.
+
+Violations Found: 1 • [none]
+
+FINANCIAL RISK ANALYSIS
+
+Financial Risk Score: 82.0/100 (Higher = Lower Risk)
+
+Operating & Cost Assessment: The financial risk of {supplier_name} is scored as follows, taking into account various factors such as tariffs, inflation, currency exchange risks, economic stability, trade restrictions, and cost predictability. The score indicates that the supplier's operations have a moderate level of risk.
+
+Risk Factors Identified: 0 • No significant financial risks identified
+
+RISK MANAGEMENT ANALYSIS
+
+Risk Management Score: 80.0/100 (Higher = Lower Risk)
+
+Risk Assessment: The risk management of Sunrise Sustainable scores well due to its robust capacity constraints, which prevent it from fully utilizing its manufacturing facilities. The company's seasonal demand fluctuations create natural disasters risks such as flooding and droughts, but these are mitigated by having multiple distribution centers and a warehouse capacity. Additionally, the company has implemented measures to minimize supply chain risks, including using high-reliability subcontractors.
+
+Identified Risk Factors: 0 • No significant risk factors identified
+
+RECOMMENDATION
+
+Based on comprehensive analysis across compliance, financial, and risk management factors, this supplier demonstrates strong alignment with your business values and meets all required thresholds for partnership consideration

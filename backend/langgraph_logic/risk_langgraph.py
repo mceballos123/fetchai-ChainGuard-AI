@@ -71,7 +71,7 @@ class RiskRAGSystem:
         self.query_engine = None
 
         # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=600)
+        self.llm = Ollama(model="llama3.2:1b", request_timeout=300)
         self.llm_type = "ollama"
 
         # Initialize Ollama embeddings
@@ -114,41 +114,37 @@ class RiskRAGSystem:
             return False
 
     async def _load_risk_files(self, ctx: Context) -> bool:
-        """Load risk management files from directory"""
+        """Load only sunrise_sustainable risk management file"""
         try:
-            if not RISK_FILES_DIR.exists():
-                ctx.logger.error(
-                    f"Risk management files directory not found: {RISK_FILES_DIR}"
-                )
-                ctx.logger.error(f"Current working directory: {Path.cwd()}")
+            # Load only the sunrise_sustainable file
+            file_path = RISK_FILES_DIR / "sunrise_sustainable.txt"
+
+            if not file_path.exists():
+                ctx.logger.error(f"Risk management file not found: {file_path}")
                 return False
 
-            # List files before loading
-            files_in_dir = list(RISK_FILES_DIR.glob("*.txt"))
-            ctx.logger.info(f"Files found in directory: {len(files_in_dir)}")
-            for f in files_in_dir:
-                ctx.logger.info(f"   - {f.name}")
+            ctx.logger.info(f"Loading risk management file: {file_path.name}")
 
-            # Use LlamaIndex to load documents
-            reader = SimpleDirectoryReader(str(RISK_FILES_DIR))
-            self.documents = reader.load_data()
+            # Use LlamaIndex to load the single document
+            reader = SimpleDirectoryReader(str(RISK_FILES_DIR), required_exts=[".txt"])
+            all_documents = reader.load_data()
+
+            # Filter to only sunrise_sustainable
+            self.documents = [
+                doc
+                for doc in all_documents
+                if "sunrise_sustainable" in doc.metadata.get("file_name", "").lower()
+            ]
 
             if not self.documents:
-                ctx.logger.error("No documents found in risk_management_files folder")
+                ctx.logger.error(
+                    "Could not load sunrise_sustainable risk management file"
+                )
                 return False
 
-            # Ensure we have all 5 expected documents
-            expected_count = 5
-            if len(self.documents) < expected_count:
-                ctx.logger.warning(
-                    f"Only loaded {len(self.documents)} documents, expected {expected_count}"
-                )
-
-            ctx.logger.info(f"Loaded {len(self.documents)} risk management documents")
-            for i, doc in enumerate(self.documents, 1):
-                file_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"   {i}. {file_name}")
-
+            ctx.logger.info(
+                f"Successfully loaded risk management document for sunrise_sustainable"
+            )
             return True
 
         except Exception as e:
@@ -241,7 +237,7 @@ class RiskRAGSystem:
 
             # Create query engine
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=5, response_mode="tree_summarize", verbose=True
+                similarity_top_k=1, response_mode="compact", verbose=True
             )
 
             ctx.logger.info("Pinecone vector store initialized")
@@ -349,7 +345,16 @@ class RiskRAGSystem:
             risk_query = risk_prompt(supplier_name, industry)
 
             ctx.logger.info("Executing risk management query...")
-            response = self.query_engine.query(risk_query)
+
+            # For single hardcoded file, read directly instead of using RAG
+            # This bypasses the slow RAG query and compact/refine process
+            supplier_text = ""
+            for doc in self.documents:
+                supplier_text += doc.text + "\n\n"
+
+            # Use simple LLM predict instead of full RAG query
+            simple_query = f"{risk_query}\n\nSupplier Data:\n{supplier_text[:2000]}"  # Limit to 2000 chars
+            response = self.llm.complete(simple_query)
             response_text = str(response)
 
             # Parse the response
@@ -548,7 +553,7 @@ def risk_check_node(
     """
     Node 1: Run risk management check on supplier using RAG system.
 
-    Input: supplier_name, industry
+    Input: supplier_name (pre-selected by Compliance Agent), industry
     Output: risk_score, risk_details, risk_factors
     """
     ctx.logger.info("=" * 70)
@@ -556,13 +561,12 @@ def risk_check_node(
     ctx.logger.info("=" * 70)
 
     try:
-        ctx.logger.info(
-            f"Checking risk management for: {state.get('supplier_name', 'Unknown')}"
-        )
+        supplier_name = state.get("supplier_name", "Unknown")
+        ctx.logger.info(f"Analyzing risk management for: {supplier_name}")
 
-        # Run RAG query for risk management
+        # Run RAG query for risk management on the provided supplier
         rag_result = rag_system.query_risk_documents_sync(
-            supplier_name=state.get("supplier_name", ""),
+            supplier_name=supplier_name,
             industry=state.get("industry", ""),
         )
 
