@@ -133,7 +133,7 @@ async def handle_risk_request(
         # Read hardcoded file directly
         from pathlib import Path
         from backend.prompts.risk_prompt import risk_prompt
-        from llama_index.llms.ollama import Ollama
+        from ollama import Client
 
         # Go up 3 levels: risk_agent.py -> supplier_search -> agents -> backend
         risk_file = (
@@ -158,12 +158,12 @@ async def handle_risk_request(
         # Combine prompt + supplier data
         full_query = f"{prompt}\n\nSupplier Data:\n{supplier_text[:2000]}"
 
-        # Initialize LLM (5 minute timeout for slow model)
-        llm = Ollama(model="llama3.2:1b", request_timeout=300)
+        # Initialize Ollama client (direct connection) with 5-minute timeout
+        client = Client(host="http://127.0.0.1:11434", timeout=300)
 
         ctx.logger.info("Sending query to LLM (llama3.2:1b)...")
-        llm_response = llm.complete(full_query)
-        response_text = str(llm_response)
+        llm_response = client.generate(model="llama3.2:1b", prompt=full_query)
+        response_text = llm_response["response"]
 
         ctx.logger.info("=" * 70)
         ctx.logger.info("LLM RESPONSE:")
