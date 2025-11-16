@@ -18,6 +18,7 @@ from llama_index.core.node_parser import SimpleNodeParser
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 from llama_index.embeddings.ollama import OllamaEmbedding
 from pinecone import Pinecone, ServerlessSpec
+from ollama import Client
 from llama_index.llms.ollama import Ollama
 
 from langgraph.graph import StateGraph, START, END
@@ -71,16 +72,25 @@ class ComplianceRAGSystem:
         self.index = None
         self.query_engine = None
 
-        # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=10)
+        # Initialize Ollama Client (direct connection)
+        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
         self.llm_type = "ollama"
+        self.llm_model = "llama3.2:1b"
 
-        # Initialize Ollama embeddings
+        print(f"llm_model: {self.llm_model}")
+        print(f"llm_type: {self.llm_type}")
+        print(f"ollama_client: {self.ollama_client}")
+
+        # Initialize Ollama embeddings (still using LlamaIndex for embeddings)
         self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
 
-        # Configure Settings for LLamaIndex (BEFORE any Pinecone initialization!)
-        Settings.llm = self.llm
+        print(f"embed_model: {self.embed_model}")
+
+        # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
         Settings.embed_model = self.embed_model
+        Settings.llm = Ollama(model = self.llm_model, request_timeout = 300)
+
+        print(f"Settings.embed_model: {Settings.embed_model}")
 
         self.documents = []
 
@@ -306,13 +316,12 @@ class ComplianceRAGSystem:
             if not pinecone_api_key:
                 ctx.logger.error("PINECONE_API_KEY not set")
                 return False
-
             # Initialize Pinecone
             pc = Pinecone(api_key=pinecone_api_key)
 
             # Check if index exists
             existing_indexes = [idx.name for idx in pc.list_indexes()]
-
+            ctx.logger.info(f"existing_indexes: {existing_indexes}")
             if PINECONE_INDEX_NAME not in existing_indexes:
                 ctx.logger.info(f"Creating new Pinecone index: {PINECONE_INDEX_NAME}")
                 pc.create_index(
@@ -335,14 +344,15 @@ class ComplianceRAGSystem:
 
             # Create query engine with compact mode (faster than tree_summarize)
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=1, response_mode="compact", verbose=True
-            )
-
+                similarity_top_k=3, response_mode="compact", verbose=True
+            ) 
             ctx.logger.info("Pinecone vector store initialized")
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Error setting up Pinecone: {e}")
+            ctx.logger.error(f"Error setting up Pinecone: {e}") # This is causing the error "OpenAI"
+            ctx.logger.error(f"Error cause:{e.__cause__}")
+            ctx.logger.error(f"Error with traceback: {e.with_traceback}")
             return False
 
     async def _index_documents(self, ctx: Context) -> bool:
@@ -457,10 +467,13 @@ class ComplianceRAGSystem:
 
             ctx.logger.info("Executing direct LLM query (NO RAG)...")
 
-            # Use simple LLM predict instead of full RAG query
+            # Use direct Ollama client instead of LlamaIndex wrapper
             simple_query = f"{combined_query}\n\nSupplier Data:\n{supplier_text[:3000]}"  # Limit to 3000 chars
-            response = self.llm.complete(simple_query)
-            response_text = str(response)
+            ctx.logger.info(f"Sending query to Ollama ({self.llm_model})...")
+            llm_response = self.ollama_client.generate(
+                model=self.llm_model, prompt=simple_query
+            )
+            response_text = llm_response["response"]
 
             # Parse response to extract supplier name and compliance data
             selected_supplier = None

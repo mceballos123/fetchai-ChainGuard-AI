@@ -12,7 +12,6 @@ from backend.langgraph_logic.financial_langgraph import (
     build_financial_workflow,
 )
 from backend.langgraph_logic.state_schemas import SupplierWorkflowState
-
 # Import test utilities
 from backend.test_func import (
     verify_compliance_connection,
@@ -160,79 +159,65 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         )
 
     try:
-        # === DIRECT PROMPT-BASED ANALYSIS (BYPASSING LANGGRAPH FOR NOW) ===
+        # === USING LANGGRAPH WORKFLOW WITH RAG ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("DIRECT FINANCIAL ANALYSIS (NO LANGGRAPH/RAG)")
+        ctx.logger.info("RUNNING FINANCIAL ANALYSIS WITH LANGGRAPH + RAG")
         ctx.logger.info("=" * 70)
 
-        # Read hardcoded file directly
-        from pathlib import Path
-        from backend.prompts.finance_prompt import finance_prompt
-        from ollama import Client
+        if financial_workflow is None:
+            ctx.logger.error("Financial workflow not initialized!")
+            raise RuntimeError("Financial workflow not ready")
 
-        # Go up 3 levels: financial_agent.py -> supplier_search -> agents -> backend
-        financial_file = (
-            Path(__file__).parent.parent.parent
-            / "financial_files"
-            / "sunrise_sustainable_financial.txt"
+        # Create workflow state from request
+        workflow_state = SupplierWorkflowState(
+            request_id=msg.request_id,
+            timestamp=msg.timestamp,
+            user_input="",
+            business_type="",
+            company_values="",
+            industry=msg.industry,
+            product_needed="",
+            supplier_name=msg.supplier_name,
+            supplier_location=None,
+            supplier_country=None,
+            retrieved_documents=None,
+            rag_context=None,
+            compliance_score=None,
+            ethics_info=None,
+            sustainability_info=None,
+            violations=None,
+            financial_score=None,
+            financial_info=None,
+            risk_score=None,
+            risk_details=None,
+            risk_factors=None,
+            current_step="financial_check",
+            error_message=None,
+            should_continue=True,
+            messages=[],
         )
 
-        if not financial_file.exists():
-            ctx.logger.error(f"Hardcoded financial file not found: {financial_file}")
-            raise FileNotFoundError(f"Financial file missing: {financial_file}")
-
-        # Read file content
-        with open(financial_file, "r") as f:
-            supplier_text = f.read()
-
-        ctx.logger.info(f"Loaded {len(supplier_text)} chars from {financial_file.name}")
-
-        # Use finance prompt
-        prompt = finance_prompt(msg.supplier_name, msg.industry)
-
-        # Combine prompt + supplier data
-        full_query = f"{prompt}\n\nSupplier Data:\n{supplier_text[:2000]}"
-
-        # Initialize Ollama client (direct connection) with 5-minute timeout
-        client = Client(host="http://127.0.0.1:11434", timeout=300)
-
-        ctx.logger.info("Sending query to LLM (llama3.2:1b)...")
-        llm_response = client.generate(model="llama3.2:1b", prompt=full_query)
-        response_text = llm_response["response"]
+        ctx.logger.info("Invoking LangGraph financial workflow...")
+        result = financial_workflow.invoke(workflow_state)
 
         ctx.logger.info("=" * 70)
-        ctx.logger.info("LLM RESPONSE:")
-        ctx.logger.info(response_text[:500])
+        ctx.logger.info("WORKFLOW RESULT:")
+        ctx.logger.info(f"Financial Score: {result.get('financial_score', 0.0)}")
+        ctx.logger.info(f"Current Step: {result.get('current_step', 'unknown')}")
         ctx.logger.info("=" * 70)
 
-        # Parse response (simple extraction)
-        financial_score = 70.0
-        financial_details = "Analysis complete"
-        risk_factors = []
-
-        for line in response_text.split("\n"):
-            line_lower = line.lower()
-            if "financial_score:" in line_lower:
-                try:
-                    score_str = line.split(":")[-1].strip().split()[0]
-                    financial_score = float(score_str)
-                    ctx.logger.info(f"Extracted financial_score: {financial_score}")
-                except:
-                    pass
-            elif "financial_details:" in line_lower:
-                financial_details = line.split(":", 1)[-1].strip()
-            elif "risk_factors:" in line_lower:
-                factors_str = line.split(":", 1)[-1].strip()
-                if factors_str.lower() not in ["minimal risks", "none", ""]:
-                    risk_factors = [f.strip() for f in factors_str.split(",")]
+        # Extract results
+        financial_score = result.get("financial_score", 70.0)
+        financial_details = result.get("financial_info", "Analysis complete")
+        risk_factors = result.get("risk_factors", [])
 
         # Build response
         response = FinancialResponse(
             request_id=msg.request_id,
-            supplier_name="sunrise_sustainable",
+            supplier_name=msg.supplier_name,
             financial_score=financial_score,
             financial_details=financial_details,
-            risk_factors=risk_factors,
+            risk_factors=risk_factors if risk_factors else [],
             timestamp="",
         )
 
@@ -246,7 +231,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
         # Determine status based on score
         current_step = (
-            "financial_approved" if financial_score >= 60 else "financial_rejected"
+            "financial_approved" if financial_score >= 70 else "financial_rejected"
         )
         ctx.logger.info(f"Status: {current_step}")
 

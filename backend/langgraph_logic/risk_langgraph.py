@@ -17,11 +17,11 @@ from llama_index.core.node_parser import SimpleNodeParser
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 from llama_index.embeddings.ollama import OllamaEmbedding
 from pinecone import Pinecone, ServerlessSpec
-from llama_index.llms.ollama import Ollama
+from ollama import Client
 
 from langgraph.graph import StateGraph, START, END
 from ..prompts.risk_prompt import risk_prompt
-
+from llama_index.llms.ollama import Ollama
 load_dotenv()
 
 FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_RISK")
@@ -70,17 +70,18 @@ class RiskRAGSystem:
         self.index = None
         self.query_engine = None
 
-        # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=300)
+        # Initialize Ollama Client (direct connection)
+        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
+    
         self.llm_type = "ollama"
+        self.llm_model = "llama3.2:1b"
 
-        # Initialize Ollama embeddings
+        # Initialize Ollama embeddings (still using LlamaIndex for embeddings)
         self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
 
-        # Configure Settings for LlamaIndex
-        Settings.llm = self.llm
+        # Configure Settings for LlamaIndex (embeddings only)
         Settings.embed_model = self.embed_model
-
+        Settings.llm = Ollama(model = self.llm_model, request_timeout = 300)
         self.documents = []
 
     async def initialize(self, ctx: Context) -> bool:
@@ -352,10 +353,13 @@ class RiskRAGSystem:
             for doc in self.documents:
                 supplier_text += doc.text + "\n\n"
 
-            # Use simple LLM predict instead of full RAG query
+            # Use direct Ollama client instead of LlamaIndex wrapper
             simple_query = f"{risk_query}\n\nSupplier Data:\n{supplier_text[:2000]}"  # Limit to 2000 chars
-            response = self.llm.complete(simple_query)
-            response_text = str(response)
+            ctx.logger.info(f"Sending query to Ollama ({self.llm_model})...")
+            llm_response = self.ollama_client.generate(
+                model=self.llm_model, prompt=simple_query
+            )
+            response_text = llm_response["response"]
 
             # Parse the response
             result = await self._parse_rag_response(ctx, response_text, supplier_name)
