@@ -77,20 +77,12 @@ class ComplianceRAGSystem:
         self.llm_type = "ollama"
         self.llm_model = "llama3.2:1b"
 
-        print(f"llm_model: {self.llm_model}")
-        print(f"llm_type: {self.llm_type}")
-        print(f"ollama_client: {self.ollama_client}")
-
         # Initialize Ollama embeddings (still using LlamaIndex for embeddings)
         self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
 
-        print(f"embed_model: {self.embed_model}")
-
         # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
         Settings.embed_model = self.embed_model
-        Settings.llm = Ollama(model = self.llm_model, request_timeout = 300)
-
-        print(f"Settings.embed_model: {Settings.embed_model}")
+        Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
 
         self.documents = []
 
@@ -179,16 +171,12 @@ class ComplianceRAGSystem:
             return None
 
         try:
-            ctx.logger.info("Selecting best supplier match...")
-            ctx.logger.info(f" Available suppliers: {len(self.documents)}")
-
             # Create a mapping of file names to help with matching
             supplier_files = {}
             for doc in self.documents:
                 file_name = doc.metadata.get("file_name", "Unknown")
                 normalized = file_name.lower().replace(".txt", "")
                 supplier_files[normalized] = file_name
-                ctx.logger.info(f"   - {file_name}")
 
             # Build selection query for LLM
             supplier_list = "\n".join(
@@ -210,15 +198,11 @@ class ComplianceRAGSystem:
             Respond with ONLY the exact supplier name from the list.
             """
 
-            ctx.logger.info("Using LLM to select best supplier...")
             response = self.query_engine.query(selection_query)
             selected_supplier = str(response).strip()
 
-            ctx.logger.info(f"✓ LLM selected: '{selected_supplier}'")
-
             # Normalize the response for better matching
             normalized_response = selected_supplier.lower().replace("_", " ").strip()
-            ctx.logger.info(f"  Normalized to: '{normalized_response}'")
 
             return selected_supplier
 
@@ -244,17 +228,8 @@ class ComplianceRAGSystem:
         Handles name matching between LLM output and file names.
         """
         try:
-            ctx.logger.info(f"Filtering documents to supplier: {supplier_name}")
-            ctx.logger.info(f"Available files:")
-
-            # Log all available documents with their names
-            for doc in self.documents:
-                doc_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"File: {doc_name}")
-
             # Normalize supplier name for matching
             normalized_supplier = supplier_name.lower().replace("_", " ").strip()
-            ctx.logger.info(f"Normalized search term: '{normalized_supplier}'")
 
             # Find matching document using multiple strategies
             filtered_docs = []
@@ -266,23 +241,17 @@ class ComplianceRAGSystem:
                 # Strategy 1: Exact match on file name
                 if normalized_supplier == doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (exact): {doc_file_name}")
 
                 # Strategy 2: Partial match (supplier name contains or is contained in file name)
                 elif normalized_supplier in doc_file_name.replace("_", " "):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (partial): {doc_file_name}")
 
                 elif doc_file_name.replace("_", " ") in normalized_supplier:
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (file in supplier): {doc_file_name}")
 
                 # Strategy 3: Key word matching
                 elif any(word in doc_file_name for word in normalized_supplier.split()):
                     filtered_docs.append(doc)
-                    ctx.logger.info(f"MATCHED (keyword): {doc_file_name}")
-                else:
-                    ctx.logger.info(f"EXCLUDED: {doc_file_name}")
 
             if not filtered_docs:
                 ctx.logger.error(f"No documents found for supplier: '{supplier_name}'")
@@ -296,10 +265,6 @@ class ComplianceRAGSystem:
 
             # Re-index with only the selected supplier
             self.documents = filtered_docs
-            ctx.logger.info(
-                f"Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
-            )
-            ctx.logger.info(f"Now analyzing only: {supplier_name}")
             return True
 
         except Exception as e:
@@ -345,14 +310,12 @@ class ComplianceRAGSystem:
             # Create query engine with compact mode (faster than tree_summarize)
             self.query_engine = self.index.as_query_engine(
                 similarity_top_k=3, response_mode="compact", verbose=True
-            ) 
+            )
             ctx.logger.info("Pinecone vector store initialized")
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Error setting up Pinecone: {e}") # This is causing the error "OpenAI"
-            ctx.logger.error(f"Error cause:{e.__cause__}")
-            ctx.logger.error(f"Error with traceback: {e.with_traceback}")
+            ctx.logger.error(f"Error setting up Pinecone: {e}")
             return False
 
     async def _index_documents(self, ctx: Context) -> bool:
@@ -451,10 +414,6 @@ class ComplianceRAGSystem:
 
         try:
             # Step 1 & 2 COMBINED: Select supplier AND analyze compliance in ONE query
-            ctx.logger.info("=" * 60)
-            ctx.logger.info("SUPPLIER SELECTION + COMPLIANCE ANALYSIS (COMBINED)")
-            ctx.logger.info("=" * 60)
-
             # For single hardcoded file, read directly instead of using RAG
             # This bypasses the slow RAG query
             supplier_text = ""
@@ -464,8 +423,6 @@ class ComplianceRAGSystem:
             supplier_list = "sunrise_sustainable"  # Hardcoded for now
 
             combined_query = compliance_prompt(company_values, industry, supplier_list)
-
-            ctx.logger.info("Executing direct LLM query (NO RAG)...")
 
             # Use direct Ollama client instead of LlamaIndex wrapper
             simple_query = f"{combined_query}\n\nSupplier Data:\n{supplier_text[:3000]}"  # Limit to 3000 chars
@@ -498,10 +455,6 @@ class ComplianceRAGSystem:
             ctx.logger.info(f"Selected supplier: {selected_supplier}")
 
             # Step 2: Filter documents to ONLY the selected supplier
-            ctx.logger.info("\n" + "=" * 60)
-            ctx.logger.info("DOCUMENT FILTERING PHASE")
-            ctx.logger.info("=" * 60)
-
             if not await self.filter_to_supplier(ctx, selected_supplier):
                 ctx.logger.error("Failed to filter to selected supplier")
                 return self._generate_fallback_response(selected_supplier)
@@ -511,10 +464,6 @@ class ComplianceRAGSystem:
                 ctx, response_text, selected_supplier
             )
             result["selected_supplier"] = selected_supplier
-
-            ctx.logger.info(f"Compliance analysis complete!")
-            ctx.logger.info(f"   Supplier: {selected_supplier}")
-            ctx.logger.info(f"   Score: {result['compliance_score']}/100")
 
             return result
 
@@ -530,11 +479,6 @@ class ComplianceRAGSystem:
     ) -> Dict[str, Any]:
         """Parse LLM response and extract structured compliance data"""
         try:
-            ctx.logger.info("Parsing compliance scores from LLM response...")
-            ctx.logger.info("=" * 70)
-            ctx.logger.info("RAW LLM RESPONSE:")
-            ctx.logger.info(response_text)
-            ctx.logger.info("=" * 70)
 
             # Initialize defaults
             ethics_score = 50.0
@@ -554,35 +498,21 @@ class ComplianceRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         ethics_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"Extracted ETHICS_SCORE: {ethics_score}")
-                    except (ValueError, IndexError) as e:
-                        ctx.logger.warning(
-                            f"Could not parse ethics score from: {line} - {e}"
-                        )
+                    except (ValueError, IndexError):
                         pass
 
                 elif "sustainability_score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         sustainability_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(
-                            f"Extracted SUSTAINABILITY_SCORE: {sustainability_score}"
-                        )
-                    except (ValueError, IndexError) as e:
-                        ctx.logger.warning(
-                            f"Could not parse sustainability score from: {line} - {e}"
-                        )
+                    except (ValueError, IndexError):
                         pass
 
                 elif "combined_score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         combined_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"Extracted COMBINED_SCORE: {combined_score}")
-                    except (ValueError, IndexError) as e:
-                        ctx.logger.warning(
-                            f"Could not parse combined score from: {line} - {e}"
-                        )
+                    except (ValueError, IndexError):
                         pass
 
                 elif "ethics_info:" in line_lower:
@@ -612,7 +542,6 @@ class ComplianceRAGSystem:
 
                     if content:
                         ethics_info = content
-                        ctx.logger.info(f"Extracted ETHICS_INFO: {ethics_info[:60]}...")
 
                 elif "sustainability_info:" in line_lower:
                     # Extract content after "sustainability_info:"
@@ -641,19 +570,14 @@ class ComplianceRAGSystem:
 
                     if content:
                         sustainability_info = content
-                        ctx.logger.info(
-                            f"Extracted SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
-                        )
 
                 elif "violations:" in line_lower:
                     violations_str = line.split(":", 1)[-1].strip().lower()
                     if violations_str != "none" and violations_str:
                         violations = [v.strip() for v in violations_str.split(",")]
-                    ctx.logger.info(f"Extracted VIOLATIONS: {violations}")
 
             # Fallback: If we still have "Insufficient data", try to extract from raw text
             if ethics_info == "Insufficient data":
-                ctx.logger.info("Attempting fallback extraction for ethics_info...")
                 # Try to find ethics-related content in the response
                 if "ethics" in response_text.lower():
                     ethics_section = self._extract_section_content(
@@ -661,12 +585,8 @@ class ComplianceRAGSystem:
                     )
                     if ethics_section:
                         ethics_info = ethics_section
-                        ctx.logger.info(f"Fallback ETHICS_INFO: {ethics_info[:60]}...")
 
             if sustainability_info == "Insufficient data":
-                ctx.logger.info(
-                    "Attempting fallback extraction for sustainability_info..."
-                )
                 # Try to find sustainability-related content in the response
                 if "sustainability" in response_text.lower():
                     sustainability_section = self._extract_section_content(
@@ -674,29 +594,10 @@ class ComplianceRAGSystem:
                     )
                     if sustainability_section:
                         sustainability_info = sustainability_section
-                        ctx.logger.info(
-                            f"Fallback SUSTAINABILITY_INFO: {sustainability_info[:60]}..."
-                        )
 
             # If combined_score wasn't provided, calculate it
             if combined_score == 50.0:
                 combined_score = (ethics_score + sustainability_score) / 2
-                ctx.logger.info(
-                    f"Combined score calculated from ethics+sustainability: {combined_score}"
-                )
-
-            ctx.logger.info("=" * 70)
-            ctx.logger.info(f"FINAL PARSED SCORES:")
-            ctx.logger.info(f"  Ethics: {ethics_score}/100")
-            ctx.logger.info(f"  Sustainability: {sustainability_score}/100")
-            ctx.logger.info(f"  Combined (Compliance): {combined_score}/100")
-            ctx.logger.info(
-                f"  Ethics Info Extracted: {ethics_info != 'Insufficient data'}"
-            )
-            ctx.logger.info(
-                f"  Sustainability Info Extracted: {sustainability_info != 'Insufficient data'}"
-            )
-            ctx.logger.info("=" * 70)
 
             return {
                 "compliance_score": float(combined_score),

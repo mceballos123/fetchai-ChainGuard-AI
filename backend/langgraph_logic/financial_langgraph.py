@@ -83,7 +83,7 @@ class FinancialRAGSystem:
 
         # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
         Settings.embed_model = self.embed_model
-        Settings.llm = Ollama(model = self.llm_model, request_timeout = 300)
+        Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
         self.documents = []
 
     async def initialize(self, ctx: Context) -> bool:
@@ -428,11 +428,6 @@ class FinancialRAGSystem:
     ) -> Dict[str, Any]:
         """Parse LLM response and extract structured financial data"""
         try:
-            ctx.logger.info("Parsing financial scores from LLM response...")
-            ctx.logger.info("=" * 70)
-            ctx.logger.info("RAW LLM RESPONSE:")
-            ctx.logger.info(response_text)
-            ctx.logger.info("=" * 70)
 
             # Initialize defaults
             financial_score = 50.0
@@ -449,11 +444,7 @@ class FinancialRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         financial_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"Financial Score: {financial_score}")
-                    except (ValueError, IndexError) as e:
-                        ctx.logger.warning(
-                            f"Could not parse financial score from: {line} - {e}"
-                        )
+                    except (ValueError, IndexError):
                         pass
 
                 elif "financial_details:" in line_lower:
@@ -506,24 +497,11 @@ class FinancialRAGSystem:
                         content = re.sub(r"\s+", " ", content).strip()
 
                         financial_details = content
-                        ctx.logger.info(
-                            f"Extracted FINANCIAL_DETAILS: {financial_details[:100]}..."
-                        )
 
                 elif "risk_factors:" in line_lower:
                     risk_str = line.split(":", 1)[-1].strip().lower()
                     if risk_str != "minimal risks" and risk_str and risk_str != "none":
                         risk_factors = [r.strip() for r in risk_str.split(",")]
-                    ctx.logger.info(f"Extracted RISK_FACTORS: {risk_factors}")
-
-            ctx.logger.info("=" * 70)
-            ctx.logger.info(f"FINAL PARSED FINANCIAL DATA:")
-            ctx.logger.info(f"  Financial Score: {financial_score}/100")
-            ctx.logger.info(
-                f"  Details Extracted: {financial_details != 'Insufficient financial data'}"
-            )
-            ctx.logger.info(f"  Risk Factors Count: {len(risk_factors)}")
-            ctx.logger.info("=" * 70)
 
             return {
                 "financial_score": float(financial_score),

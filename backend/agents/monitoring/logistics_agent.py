@@ -245,8 +245,6 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
 
     try:
         # Load supplier data from files
-        ctx.logger.info(f"Loading supplier data for: {msg.supplier_name}")
-
         compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
         risk_data = load_supplier_file(msg.supplier_name, RISK_MANAGEMENT_FILES_PATH)
         financial_data = load_supplier_file(msg.supplier_name, FINANCIAL_FILES_PATH)
@@ -273,16 +271,8 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
             )
         else:
             # Extract logistics insights from supplier data
-            ctx.logger.info(f"Extracting logistics insights for: {msg.supplier_name}")
             insights = extract_logistics_insights(
                 compliance_data or "", risk_data or "", financial_data or ""
-            )
-
-            ctx.logger.info(f"   Current Inventory: {insights['current_inventory_level']}")
-            ctx.logger.info(f"   Predicted Inventory: {insights['predicted_inventory_level']}")
-            ctx.logger.info(f"   Restocking Status: {insights['restocking_status']}")
-            ctx.logger.info(
-                f"   Overall Logistics Status: {insights['overall_logistics_status']}"
             )
 
             # Build response from extracted insights
@@ -303,10 +293,6 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
             )
 
         ctx.logger.info("Logistics analysis complete!")
-        ctx.logger.info(f"Current Inventory Level: {response.current_inventory_level}")
-        ctx.logger.info(f"Predicted Inventory Level: {response.predicted_inventory_level}")
-        ctx.logger.info(f"Overall Logistics Status: {response.overall_logistics_status}")
-        ctx.logger.info(f"Active Alerts: {len(response.alerts)}")
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)

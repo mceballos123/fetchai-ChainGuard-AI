@@ -22,6 +22,7 @@ from ollama import Client
 from langgraph.graph import StateGraph, START, END
 from ..prompts.risk_prompt import risk_prompt
 from llama_index.llms.ollama import Ollama
+
 load_dotenv()
 
 FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_RISK")
@@ -72,7 +73,7 @@ class RiskRAGSystem:
 
         # Initialize Ollama Client (direct connection)
         self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
-    
+
         self.llm_type = "ollama"
         self.llm_model = "llama3.2:1b"
 
@@ -81,7 +82,7 @@ class RiskRAGSystem:
 
         # Configure Settings for LlamaIndex (embeddings only)
         Settings.embed_model = self.embed_model
-        Settings.llm = Ollama(model = self.llm_model, request_timeout = 300)
+        Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
         self.documents = []
 
     async def initialize(self, ctx: Context) -> bool:
@@ -382,11 +383,6 @@ class RiskRAGSystem:
     ) -> Dict[str, Any]:
         """Parse LLM response and extract structured risk data"""
         try:
-            ctx.logger.info("Parsing risk scores from LLM response...")
-            ctx.logger.info("=" * 50)
-            ctx.logger.info("RAW LLM RESPONSE:")
-            ctx.logger.info(response_text)
-            ctx.logger.info("=" * 50)
 
             # Initialize defaults (using 70 as neutral baseline instead of 50)
             risk_score = 50.0
@@ -403,11 +399,8 @@ class RiskRAGSystem:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
                         risk_score = max(0, min(100, float(score_str)))
-                        ctx.logger.info(f"Risk Score: {risk_score}")
-                    except (ValueError, IndexError) as e:
-                        ctx.logger.warning(
-                            f"Could not parse risk score from: {line} - {e}"
-                        )
+                    except (ValueError, IndexError):
+                        pass
 
                 elif "risk_details:" in line_lower:
                     # Extract content after "risk_details:"
@@ -434,7 +427,6 @@ class RiskRAGSystem:
 
                     if content:
                         risk_details = content
-                        ctx.logger.info(f"Risk Details: {risk_details[:60]}...")
 
                 elif "risk_factors:" in line_lower:
                     factors_str = line.split(":", 1)[-1].strip().lower()
@@ -444,16 +436,6 @@ class RiskRAGSystem:
                         and "none" not in factors_str
                     ):
                         risk_factors = [f.strip() for f in factors_str.split(",")]
-                    ctx.logger.info(f"Risk Factors: {risk_factors}")
-
-            ctx.logger.info("=" * 70)
-            ctx.logger.info(f"FINAL PARSED SCORES:")
-            ctx.logger.info(f"  Risk Score: {risk_score}/100")
-            ctx.logger.info(
-                f"  Risk Details Extracted: {risk_details != 'Insufficient risk data'}"
-            )
-            ctx.logger.info(f"  Risk Factors Count: {len(risk_factors)}")
-            ctx.logger.info("=" * 70)
 
             return {
                 "risk_score": float(risk_score),
