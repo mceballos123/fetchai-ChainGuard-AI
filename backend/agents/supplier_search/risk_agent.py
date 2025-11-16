@@ -94,14 +94,14 @@ async def shutdown(ctx: Context):
 @risk_protocol.on_message(model=RiskRequest, replies=RiskResponse)
 async def handle_risk_request(
     ctx: Context, sender: str, msg: RiskRequest
-):  # Causing a issue with the risk_agent
+):
     """
     Handle risk management check request from Orchestrator Agent.
 
     Process:
     1. Receive supplier info
     2. Create workflow state from request
-    3. Run LangGraph risk management workflow:
+    3. Run LangGraph risk management workflow with RAG:
        - risk_check_node: RAG analysis
        - risk_router: conditional routing (score >= 75?)
        - success_node or error_node: prepare response
@@ -125,82 +125,68 @@ async def handle_risk_request(
     ctx.logger.info(f"Current supplier state updated: {msg.supplier_name}")
 
     try:
-        # === DIRECT PROMPT-BASED ANALYSIS (BYPASSING LANGGRAPH FOR NOW) ===
+        # === USING LANGGRAPH WORKFLOW WITH RAG ===
         ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("DIRECT RISK ANALYSIS (NO LANGGRAPH/RAG)")
+        ctx.logger.info("RUNNING RISK ANALYSIS WITH LANGGRAPH + RAG")
         ctx.logger.info("=" * 70)
 
-        # Read hardcoded file directly
-        from pathlib import Path
-        from backend.prompts.risk_prompt import risk_prompt
-        from ollama import Client
+        if risk_workflow is None:
+            ctx.logger.error("Risk workflow not initialized!")
+            raise RuntimeError("Risk workflow not ready")
 
-        # Go up 3 levels: risk_agent.py -> supplier_search -> agents -> backend
-        risk_file = (
-            Path(__file__).parent.parent.parent
-            / "risk_management_files"
-            / "sunrise_sustainable.txt"
+        # Create workflow state from request
+        workflow_state = SupplierWorkflowState(
+            request_id=msg.request_id,
+            timestamp=msg.timestamp,
+            user_input="",
+            business_type="",
+            company_values="",
+            industry=msg.industry,
+            product_needed="",
+            supplier_name=msg.supplier_name,
+            supplier_location=None,
+            supplier_country=None,
+            retrieved_documents=None,
+            rag_context=None,
+            compliance_score=None,
+            ethics_info=None,
+            sustainability_info=None,
+            violations=None,
+            financial_score=None,
+            financial_info=None,
+            risk_score=None,
+            risk_details=None,
+            risk_factors=None,
+            current_step="risk_check",
+            error_message=None,
+            should_continue=True,
+            messages=[],
         )
 
-        if not risk_file.exists():
-            ctx.logger.error(f"Hardcoded risk file not found: {risk_file}")
-            raise FileNotFoundError(f"Risk file missing: {risk_file}")
-
-        # Read file content
-        with open(risk_file, "r") as f:
-            supplier_text = f.read()
-
-        ctx.logger.info(f"Loaded {len(supplier_text)} chars from {risk_file.name}")
-
-        # Use risk prompt
-        prompt = risk_prompt(msg.supplier_name, msg.industry)
-
-        # Combine prompt + supplier data
-        full_query = f"{prompt}\n\nSupplier Data:\n{supplier_text[:2000]}"
-
-        # Initialize Ollama client (direct connection) with 5-minute timeout
-        client = Client(host="http://127.0.0.1:11434", timeout=300)
-
-        ctx.logger.info("Sending query to LLM (llama3.2:1b)...")
-        llm_response = client.generate(model="llama3.2:1b", prompt=full_query)
-        response_text = llm_response["response"]
+        ctx.logger.info("Invoking LangGraph risk workflow...")
+        result = risk_workflow.invoke(workflow_state)
 
         ctx.logger.info("=" * 70)
-        ctx.logger.info("LLM RESPONSE:")
-        ctx.logger.info(response_text[:500])
+        ctx.logger.info("WORKFLOW RESULT:")
+        ctx.logger.info(f"Risk Score: {result.get('risk_score', 0.0)}")
+        ctx.logger.info(f"Current Step: {result.get('current_step', 'unknown')}")
         ctx.logger.info("=" * 70)
 
-        # Parse response (simple extraction)
-        risk_score = 70.0
-        risk_details = "Analysis complete"
-        risk_factors = []
-
-        for line in response_text.split("\n"):
-            line_lower = line.lower()
-            if "risk_score:" in line_lower:
-                try:
-                    score_str = line.split(":")[-1].strip().split()[0]
-                    risk_score = float(score_str)
-                    ctx.logger.info(f"Extracted risk_score: {risk_score}")
-                except:
-                    pass
-            elif "risk_details:" in line_lower:
-                risk_details = line.split(":", 1)[-1].strip()
-            elif "risk_factors:" in line_lower:
-                factors_str = line.split(":", 1)[-1].strip()
-                if factors_str.lower() not in ["minimal risks identified", "none", ""]:
-                    risk_factors = [f.strip() for f in factors_str.split(",")]
+        # Extract results
+        risk_score = result.get("risk_score", 70.0)
+        risk_details = result.get("risk_details", "Analysis complete")
+        risk_factors = result.get("risk_factors", [])
 
         # Build response
         response = RiskResponse(
             request_id=msg.request_id,
-            supplier_name="sunrise_sustainable",
+            supplier_name=msg.supplier_name,
             risk_score=risk_score,
             risk_details=risk_details,
-            risk_factors=risk_factors,
+            risk_factors=risk_factors if risk_factors else [],
             timestamp="",
         )
-        # Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/risk_agent.py
+
         # Validate response before sending
         is_valid, error_msg = validate_risk_response_before_sending(ctx, response)
         if not is_valid:
@@ -211,7 +197,7 @@ async def handle_risk_request(
         ctx.logger.info(f"Risk Factors: {len(response.risk_factors)}")
 
         # Determine status based on score
-        current_step = "risk_approved" if risk_score >= 60 else "risk_rejected"
+        current_step = "risk_approved" if risk_score >= 75 else "risk_rejected"
         ctx.logger.info(f"Status: {current_step}")
 
         # Update current supplier info with results

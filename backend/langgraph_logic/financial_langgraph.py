@@ -18,8 +18,8 @@ from llama_index.core.node_parser import SimpleNodeParser
 from llama_index.vector_stores.pinecone import PineconeVectorStore
 from llama_index.embeddings.ollama import OllamaEmbedding
 from pinecone import Pinecone, ServerlessSpec
+from ollama import Client
 from llama_index.llms.ollama import Ollama
-
 from langgraph.graph import StateGraph, START, END
 from ..prompts.finance_prompt import finance_prompt
 
@@ -73,17 +73,17 @@ class FinancialRAGSystem:
         self.index = None
         self.query_engine = None
 
-        # Initialize Ollama LLM
-        self.llm = Ollama(model="llama3.2:1b", request_timeout=10)
+        # Initialize Ollama Client (direct connection)
+        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
         self.llm_type = "ollama"
+        self.llm_model = "llama3.2:1b"
 
-        # Initialize Ollama embeddings
+        # Initialize Ollama embeddings (still using LlamaIndex for embeddings)
         self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
 
-        # Configure Settings for LLamaIndex (BEFORE any Pinecone initialization!)
-        Settings.llm = self.llm
+        # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
         Settings.embed_model = self.embed_model
-
+        Settings.llm = Ollama(model = self.llm_model, request_timeout = 300)
         self.documents = []
 
     async def initialize(self, ctx: Context) -> bool:
@@ -398,13 +398,17 @@ class FinancialRAGSystem:
             supplier_text = ""
             for doc in self.documents:
                 supplier_text += doc.text + "\n\n"
-            
-            # Use simple LLM predict instead of full RAG query
+
+            # Use direct Ollama client instead of LlamaIndex wrapper
             simple_query = f"{financial_query}\n\nSupplier Data:\n{supplier_text[:2000]}"  # Limit to 2000 chars
-            response = self.llm.complete(simple_query)
+            ctx.logger.info(f"Sending query to Ollama ({self.llm_model})...")
+            llm_response = self.ollama_client.generate(
+                model=self.llm_model, prompt=simple_query
+            )
+            response_text = llm_response["response"]
 
             # Parse the response
-            result = await self._parse_rag_response(ctx, str(response), supplier_name)
+            result = await self._parse_rag_response(ctx, response_text, supplier_name)
 
             ctx.logger.info(f"Financial risk analysis complete!")
             ctx.logger.info(f"   Supplier: {supplier_name}")
