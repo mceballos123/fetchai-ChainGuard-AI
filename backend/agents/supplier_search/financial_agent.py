@@ -12,7 +12,9 @@ from backend.langgraph_logic.financial_langgraph import (
     build_financial_workflow,
 )
 from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+
 # Import test utilities
+
 from backend.test_func import (
     verify_compliance_connection,
     log_request_reception,
@@ -137,9 +139,6 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     previous_supplier = ctx.storage.get("current_supplier")
     if previous_supplier:
         ctx.storage.set("previous_supplier", previous_supplier)
-        ctx.logger.info(
-            f"Previous supplier stored: {previous_supplier.get('supplier_name', 'N/A')}"
-        )
 
     # === STATE MANAGEMENT: Set new current supplier ===
     current_supplier_info = {
@@ -150,13 +149,6 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         "sender": sender,
     }
     ctx.storage.set("current_supplier", current_supplier_info)
-    ctx.logger.info(f"Current supplier state updated: {msg.supplier_name}")
-
-    # Log state transition if there was a previous supplier
-    if previous_supplier:
-        ctx.logger.info(
-            f"State Transition: {previous_supplier.get('supplier_name', 'N/A')} → {msg.supplier_name}"
-        )
 
     try:
         # === USING LANGGRAPH WORKFLOW WITH RAG ===
@@ -246,7 +238,6 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         supplier_history = ctx.storage.get("supplier_history") or []
         supplier_history.append(current_supplier_info)
         ctx.storage.set("supplier_history", supplier_history)
-        ctx.logger.info(f"Added to history (total: {len(supplier_history)} suppliers)")
 
         # Log response transmission
         log_response_transmission(

@@ -96,14 +96,20 @@ def extract_demand_insights(
 
         if "seasonal" in risk_data.lower():
             if insights["delay_details"]:
-                insights["delay_details"] += " Seasonal fluctuations may impact delivery timelines."
+                insights[
+                    "delay_details"
+                ] += " Seasonal fluctuations may impact delivery timelines."
             else:
-                insights["delay_details"] = "Seasonal variations may affect delivery schedules. Plan ahead for peak periods."
+                insights["delay_details"] = (
+                    "Seasonal variations may affect delivery schedules. Plan ahead for peak periods."
+                )
             insights["alerts"].append("Seasonal delivery variations expected")
 
     if financial_data:
         if "cost" in financial_data.lower() and "increase" in financial_data.lower():
-            insights["delay_details"] += " Cost increases may impact delivery schedules and priorities."
+            insights[
+                "delay_details"
+            ] += " Cost increases may impact delivery schedules and priorities."
             if "Delivery delay risk identified" not in insights["alerts"]:
                 insights["delay_status"] = "MONITOR: COST IMPACT"
 
@@ -118,9 +124,13 @@ def extract_demand_insights(
 
         if "distance" in risk_data.lower() or "location" in risk_data.lower():
             if insights["shipping_details"]:
-                insights["shipping_details"] += " Geographic distance may affect shipping times and costs."
+                insights[
+                    "shipping_details"
+                ] += " Geographic distance may affect shipping times and costs."
             else:
-                insights["shipping_details"] = "Geographic factors may impact shipping schedules. Track transit times carefully."
+                insights["shipping_details"] = (
+                    "Geographic factors may impact shipping schedules. Track transit times carefully."
+                )
             insights["alerts"].append("Geographic shipping considerations")
 
     # Extract quality tracking information
@@ -140,21 +150,30 @@ def extract_demand_insights(
 
         if "certification" in compliance_data.lower():
             if insights["quality_details"]:
-                insights["quality_details"] += " Quality certifications are active and maintained."
+                insights[
+                    "quality_details"
+                ] += " Quality certifications are active and maintained."
             else:
-                insights["quality_details"] = "Quality certifications verified. Standards are being met."
+                insights["quality_details"] = (
+                    "Quality certifications verified. Standards are being met."
+                )
 
     if risk_data:
         if "quality" in risk_data.lower() or "defect" in risk_data.lower():
             if "CONCERNS IDENTIFIED" not in insights["quality_status"]:
                 insights["quality_status"] = "MONITOR: QUALITY VARIANCE"
-            insights["quality_details"] += " Historical quality variance detected. Maintain strict quality checks."
+            insights[
+                "quality_details"
+            ] += (
+                " Historical quality variance detected. Maintain strict quality checks."
+            )
             insights["alerts"].append("Quality variance monitoring required")
 
     # Determine overall performance based on extracted information
     alert_count = len(insights["alerts"])
     critical_issues = [
-        alert for alert in insights["alerts"]
+        alert
+        for alert in insights["alerts"]
         if "delay" in alert.lower() or "quality control enhancement" in alert.lower()
     ]
 
@@ -215,8 +234,6 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
 
     try:
         # Load supplier data from files
-        ctx.logger.info(f"Loading supplier data for: {msg.supplier_name}")
-
         compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
         risk_data = load_supplier_file(msg.supplier_name, RISK_MANAGEMENT_FILES_PATH)
         financial_data = load_supplier_file(msg.supplier_name, FINANCIAL_FILES_PATH)
@@ -241,15 +258,9 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
             )
         else:
             # Extract demand insights from supplier data
-            ctx.logger.info(f"Extracting demand insights for: {msg.supplier_name}")
             insights = extract_demand_insights(
                 compliance_data or "", risk_data or "", financial_data or ""
             )
-
-            ctx.logger.info(f"   Delay Status: {insights['delay_status']}")
-            ctx.logger.info(f"   Shipping Status: {insights['shipping_status']}")
-            ctx.logger.info(f"   Quality Status: {insights['quality_status']}")
-            ctx.logger.info(f"   Overall Performance: {insights['overall_performance']}")
 
             # Build response from extracted insights
             response = DemandResponse(
@@ -267,8 +278,6 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
             )
 
         ctx.logger.info("Demand forecast analysis complete!")
-        ctx.logger.info(f"Overall Performance: {response.overall_performance}")
-        ctx.logger.info(f"Active Alerts: {len(response.alerts)}")
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)

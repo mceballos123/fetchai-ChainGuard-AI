@@ -2,7 +2,8 @@ from uagents import Agent, Context, Protocol
 import os
 import json
 from typing import Dict, Any, Optional
-#/Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/monitoring/performance_agent.py
+
+# /Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/monitoring/performance_agent.py
 # Import models
 from backend.models.performance import PerformanceRequest, PerformanceResponse
 from backend.prompts.performance_prompt import PROMPT
@@ -208,8 +209,6 @@ async def handle_performance_request(
 
     try:
         # Load supplier data from files
-        ctx.logger.info(f"Loading supplier data for: {msg.supplier_name}")
-
         compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
         risk_data = load_supplier_file(msg.supplier_name, RISK_MANAGEMENT_FILES_PATH)
         financial_data = load_supplier_file(msg.supplier_name, FINANCIAL_FILES_PATH)
@@ -236,16 +235,9 @@ async def handle_performance_request(
             )
         else:
             # Extract monitoring insights from supplier data
-            ctx.logger.info(f"Extracting monitoring insights for: {msg.supplier_name}")
             insights = extract_monitoring_insights(
                 compliance_data or "", risk_data or "", financial_data or ""
             )
-
-            ctx.logger.info(f"   Weather Status: {insights['weather_status']}")
-            ctx.logger.info(f"   Strike Status: {insights['strike_status']}")
-            ctx.logger.info(f"   Political Status: {insights['political_status']}")
-            ctx.logger.info(f"   Legal Status: {insights['legal_status']}")
-            ctx.logger.info(f"   Overall Risk: {insights['overall_risk']}")
 
             # Build response from extracted insights
             response = PerformanceResponse(
@@ -265,8 +257,6 @@ async def handle_performance_request(
             )
 
         ctx.logger.info("Performance monitoring analysis complete!")
-        ctx.logger.info(f"Overall Risk Level: {response.overall_risk_level}")
-        ctx.logger.info(f"Active Alerts: {len(response.alerts)}")
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)

@@ -92,9 +92,7 @@ async def shutdown(ctx: Context):
 
 
 @risk_protocol.on_message(model=RiskRequest, replies=RiskResponse)
-async def handle_risk_request(
-    ctx: Context, sender: str, msg: RiskRequest
-):
+async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
     """
     Handle risk management check request from Orchestrator Agent.
 
@@ -122,7 +120,6 @@ async def handle_risk_request(
         "sender": sender,
     }
     ctx.storage.set("current_supplier", current_supplier_info)
-    ctx.logger.info(f"Current supplier state updated: {msg.supplier_name}")
 
     try:
         # === USING LANGGRAPH WORKFLOW WITH RAG ===
@@ -211,7 +208,6 @@ async def handle_risk_request(
         supplier_history = ctx.storage.get("supplier_history") or []
         supplier_history.append(current_supplier_info)
         ctx.storage.set("supplier_history", supplier_history)
-        ctx.logger.info(f"Added to history (total: {len(supplier_history)} suppliers)")
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
