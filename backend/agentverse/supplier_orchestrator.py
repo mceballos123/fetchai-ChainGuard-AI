@@ -622,7 +622,7 @@ async def handle_demand_response(ctx: Context, sender: str, msg: DemandResponse)
 
     try:
         # Store demand response in pending_responses
-        pending_responses = ctx.storage.get("pending_responses") or {}
+        pending_responses = ctx.storage.get("pending_responses") #or {}
 
         if msg.request_id not in pending_responses:
             ctx.logger.warning(
@@ -670,7 +670,7 @@ async def handle_performance_response(
 
     try:
         # Store performance response in pending_responses
-        pending_responses = ctx.storage.get("pending_responses") or {}
+        pending_responses = ctx.storage.get("pending_responses") #or {}
 
         if msg.request_id not in pending_responses:
             ctx.logger.warning(
@@ -704,10 +704,7 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
     ctx.logger.info("=" * 60)
 
     # Verify message received from Logistics Agent
-    ctx.logger.info(f"Logistics Response for msg: {msg}")
-    ctx.logger.info(f"Logistics Response for model dump: {msg.model_dump_json()}")
-    ctx.logger.info(f"Logistics Response: {msg.overall_logistics_status}")
-
+   
     ctx.logger.info(f"Logistics Response for request_id: {msg.request_id}")
     log_message_transmission(
         ctx,
@@ -722,7 +719,8 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
 
     try:
         # Store logistics response in pending_responses
-        pending_responses = ctx.storage.get("pending_responses") or {}
+        pending_responses = ctx.storage.get("pending_responses") #or {}
+        ctx.logger.info(f"Pending responses: {pending_responses}")
 
         if msg.request_id not in pending_responses:
             ctx.logger.warning(
@@ -731,6 +729,7 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
             return
 
         pending_responses[msg.request_id]["logistics_response"] = msg.model_dump()
+        ctx.logger.info(f"Logistics response stored: {pending_responses[msg.request_id]['logistics_response']}")
         ctx.storage.set("pending_responses", pending_responses)
 
         ctx.logger.info(f"Logistics response stored")
@@ -1177,6 +1176,7 @@ supplier_orchestrator.include(financial_protocol, publish_manifest=True)
 supplier_orchestrator.include(risk_protocol, publish_manifest=True)
 supplier_orchestrator.include(performance_protocol, publish_manifest=True)
 supplier_orchestrator.include(demand_protocol, publish_manifest=True)
+supplier_orchestrator.include(logistics_protocol, publish_manifest=True)
 
 if __name__ == "__main__":
     supplier_orchestrator.run()
