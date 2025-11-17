@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 from typing import Dict, List, Any
-#backend/agents/supplier_search
+
+# backend/agents/supplier_search
 # Import chat protocol components
 from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
@@ -703,6 +704,11 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
     ctx.logger.info("=" * 60)
 
     # Verify message received from Logistics Agent
+    ctx.logger.info(f"Logistics Response for msg: {msg}")
+    ctx.logger.info(f"Logistics Response for model dump: {msg.model_dump_json()}")
+    ctx.logger.info(f"Logistics Response: {msg.overall_logistics_status}")
+
+    ctx.logger.info(f"Logistics Response for request_id: {msg.request_id}")
     log_message_transmission(
         ctx,
         "RECEIVED",
@@ -983,10 +989,10 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
         ctx.logger.error(f"No sender found for request {request_id}")
         return
 
-    # Determine overall approval status - ALL THREE must pass
-    compliance_passed = compliance_response.get("compliance_score", 0) >= 75
-    financial_passed = financial_response.get("financial_score", 0) >= 70
-    risk_passed = risk_response.get("risk_score", 0) >= 75
+    # Determine overall approval status - ALL THREE must pass (60 is the approval threshold)
+    compliance_passed = compliance_response.get("compliance_score", 0) >= 60
+    financial_passed = financial_response.get("financial_score", 0) >= 60
+    risk_passed = risk_response.get("risk_score", 0) >= 60
     overall_approved = compliance_passed and financial_passed and risk_passed
 
     # Build dynamic supplier requirements status
