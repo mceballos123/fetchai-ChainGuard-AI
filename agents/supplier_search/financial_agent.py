@@ -5,17 +5,17 @@ import json
 from datetime import datetime
 
 # Import models
-from backend.models.financial import FinancialRequest, FinancialResponse
+from models.financial import FinancialRequest, FinancialResponse
 from dotenv import load_dotenv
-from backend.langgraph_logic.financial_langgraph import (
+from langgraph_logic.financial_langgraph import (
     FinancialRAGSystem,
     build_financial_workflow,
 )
-from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+from langgraph_logic.state_schemas import SupplierWorkflowState
 
 # Import test utilities
 
-from backend.test_func import (
+from test_func.compliance_helpers import (
     verify_compliance_connection,
     log_request_reception,
     log_response_transmission,

@@ -4,8 +4,8 @@ import json
 from typing import Dict, Any, Optional
 
 # Import models
-from backend.models.logistics import LogisticsRequest, LogisticsResponse
-from backend.prompts.logistics_prompt import LOGISTICS_PROMPT
+from models.logistics import LogisticsRequest, LogisticsResponse
+from prompts.logistics_prompt import LOGISTICS_PROMPT
 from dotenv import load_dotenv
 
 load_dotenv()

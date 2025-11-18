@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Literal
-from backend.models.compliance import ComplianceRequest, ComplianceResponse
-from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+from models.compliance import ComplianceRequest, ComplianceResponse
+from langgraph_logic.state_schemas import SupplierWorkflowState
 import os
 import json
 import re
@@ -22,7 +22,7 @@ from ollama import Client
 from llama_index.llms.ollama import Ollama
 
 from langgraph.graph import StateGraph, START, END
-from ..prompts.compliance_prompt import compliance_prompt
+from prompts.compliance_prompt import compliance_prompt
 
 load_dotenv()
 
@@ -45,13 +45,13 @@ def _resolve_compliance_path() -> Path:
         if resolved.exists():
             return resolved
 
-    # Option 2: Try relative path from backend directory
+    # Option 2: Try relative path from root directory
     relative_path = Path(__file__).parent.parent / "compliance_files"
     if relative_path.exists():
         return relative_path
 
     # Option 3: Try from current working directory
-    cwd_path = Path.cwd() / "backend" / "compliance_files"
+    cwd_path = Path.cwd() / "compliance_files"
     if cwd_path.exists():
         return cwd_path
 

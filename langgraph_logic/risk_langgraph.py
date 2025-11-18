@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Literal
-from backend.models.risk import RiskRequest, RiskResponse
-from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+from models.risk import RiskRequest, RiskResponse
+from langgraph_logic.state_schemas import SupplierWorkflowState
 import os
 import re
 
@@ -20,7 +20,7 @@ from pinecone import Pinecone, ServerlessSpec
 from ollama import Client
 
 from langgraph.graph import StateGraph, START, END
-from ..prompts.risk_prompt import risk_prompt
+from prompts.risk_prompt import risk_prompt
 from llama_index.llms.ollama import Ollama
 
 load_dotenv()
@@ -45,13 +45,13 @@ def _resolve_risk_path() -> Path:
         if resolved.exists():
             return resolved
 
-    # Option 2: Try relative path from backend directory
+    # Option 2: Try relative path from root directory
     relative_path = Path(__file__).parent.parent / "risk_management_files"
     if relative_path.exists():
         return relative_path
 
     # Option 3: Try from current working directory
-    cwd_path = Path.cwd() / "backend" / "risk_management_files"
+    cwd_path = Path.cwd() / "risk_management_files"
     if cwd_path.exists():
         return cwd_path
 

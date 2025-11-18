@@ -6,16 +6,16 @@ import json
 from datetime import datetime
 
 # Import models
-from backend.models.compliance import ComplianceRequest, ComplianceResponse
+from models.compliance import ComplianceRequest, ComplianceResponse
 from dotenv import load_dotenv
-from backend.langgraph_logic.compliance_langgraph import (
+from langgraph_logic.compliance_langgraph import (
     ComplianceRAGSystem,
     build_compliance_workflow,
 )
-from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+from langgraph_logic.state_schemas import SupplierWorkflowState
 
 # Import test utilities
-from backend.test_func import (
+from test_func.compliance_helpers import (
     verify_compliance_connection,
     log_request_reception,
     log_response_transmission,

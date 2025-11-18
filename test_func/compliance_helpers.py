@@ -9,9 +9,9 @@ from typing import Dict, Any, Tuple
 from datetime import datetime
 from uagents import Context
 
-from backend.models.compliance import ComplianceResponse
-from backend.models.financial import FinancialResponse
-from backend.models.risk import RiskResponse
+from models.compliance import ComplianceResponse
+from models.financial import FinancialResponse
+from models.risk import RiskResponse
 from .test_agent_communication import verify_compliance_response_format
 
 

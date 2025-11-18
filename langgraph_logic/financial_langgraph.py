@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Literal
-from backend.models.financial import FinancialRequest, FinancialResponse
-from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+from models.financial import FinancialRequest, FinancialResponse
+from langgraph_logic.state_schemas import SupplierWorkflowState
 import os
 import json
 import re
@@ -21,11 +21,11 @@ from pinecone import Pinecone, ServerlessSpec
 from ollama import Client
 from llama_index.llms.ollama import Ollama
 from langgraph.graph import StateGraph, START, END
-from ..prompts.finance_prompt import finance_prompt
+from prompts.finance_prompt import finance_prompt
 
 load_dotenv()
 
-FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_FINANCIAL", "backend/financial_files")
+FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_FINANCIAL", "financial_files")
 
 
 def _resolve_financial_path() -> Path:
@@ -44,13 +44,13 @@ def _resolve_financial_path() -> Path:
         if resolved.exists():
             return resolved
 
-    # Option 2: Try relative path from backend directory
+    # Option 2: Try relative path from root directory
     relative_path = Path(__file__).parent.parent / "financial_files"
     if relative_path.exists():
         return relative_path
 
     # Option 3: Try from current working directory
-    cwd_path = Path.cwd() / "backend" / "financial_files"
+    cwd_path = Path.cwd() / "financial_files"
     if cwd_path.exists():
         return cwd_path
 
