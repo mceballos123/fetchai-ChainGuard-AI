@@ -106,10 +106,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
     4. Build RiskResponse from workflow result
     5. Return response to orchestrator
     """
-    ctx.logger.info(f"Received RiskRequest from {sender}")
-    ctx.logger.info(f"   Request ID: {msg.request_id}")
-    ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-    ctx.logger.info(f"   Industry: {msg.industry}")
+    ctx.logger.info(f"Received RiskRequest for {msg.supplier_name}")
 
     # Update current supplier state
     current_supplier_info = {
@@ -123,9 +120,6 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
 
     try:
         # === USING LANGGRAPH WORKFLOW WITH RAG ===
-        ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("RUNNING RISK ANALYSIS WITH LANGGRAPH + RAG")
-        ctx.logger.info("=" * 70)
 
         if risk_workflow is None:
             ctx.logger.error("Risk workflow not initialized!")
@@ -160,14 +154,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
             messages=[],
         )
 
-        ctx.logger.info("Invoking LangGraph risk workflow...")
         result = risk_workflow.invoke(workflow_state)
-
-        ctx.logger.info("=" * 70)
-        ctx.logger.info("WORKFLOW RESULT:")
-        ctx.logger.info(f"Risk Score: {result.get('risk_score', 0.0)}")
-        ctx.logger.info(f"Current Step: {result.get('current_step', 'unknown')}")
-        ctx.logger.info("=" * 70)
 
         # Extract results
         risk_score = result.get("risk_score", 70.0)
@@ -189,13 +176,8 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        ctx.logger.info("Risk management analysis complete!")
-        ctx.logger.info(f"Score: {response.risk_score}/100")
-        ctx.logger.info(f"Risk Factors: {len(response.risk_factors)}")
-
         # Determine status based on score
         current_step = "risk_approved" if risk_score >= 75 else "risk_rejected"
-        ctx.logger.info(f"Status: {current_step}")
 
         # Update current supplier info with results
         current_supplier_info["risk_score"] = response.risk_score
@@ -211,8 +193,6 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
-
-        ctx.logger.info(f"Sent RiskResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing risk request: {e}")

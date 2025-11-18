@@ -127,10 +127,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     5. Build FinancialResponse from workflow result
     6. Return response to orchestrator
     """
-    ctx.logger.info(f"Received FinancialRequest from {sender}")
-    ctx.logger.info(f"   Request ID: {msg.request_id}")
-    ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-    ctx.logger.info(f"   Industry: {msg.industry}")
+    ctx.logger.info(f"Received FinancialRequest for {msg.supplier_name}")
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -152,9 +149,6 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
     try:
         # === USING LANGGRAPH WORKFLOW WITH RAG ===
-        ctx.logger.info("\n" + "=" * 70)
-        ctx.logger.info("RUNNING FINANCIAL ANALYSIS WITH LANGGRAPH + RAG")
-        ctx.logger.info("=" * 70)
 
         if financial_workflow is None:
             ctx.logger.error("Financial workflow not initialized!")
@@ -189,14 +183,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             messages=[],
         )
 
-        ctx.logger.info("Invoking LangGraph financial workflow...")
         result = financial_workflow.invoke(workflow_state)
-
-        ctx.logger.info("=" * 70)
-        ctx.logger.info("WORKFLOW RESULT:")
-        ctx.logger.info(f"Financial Score: {result.get('financial_score', 0.0)}")
-        ctx.logger.info(f"Current Step: {result.get('current_step', 'unknown')}")
-        ctx.logger.info("=" * 70)
 
         # Extract results
         financial_score = result.get("financial_score", 70.0)
@@ -218,14 +205,10 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        ctx.logger.info("Financial analysis complete!")
-        ctx.logger.info(f"Financial Score: {response.financial_score}/100")
-
         # Determine status based on score
         current_step = (
             "financial_approved" if financial_score >= 70 else "financial_rejected"
         )
-        ctx.logger.info(f"Status: {current_step}")
 
         # === STATE MANAGEMENT: Add result to current state ===
         # add current supplier info to the context storage
@@ -250,8 +233,6 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
-
-        ctx.logger.info(f"Sent FinancialResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing financial request: {e}")

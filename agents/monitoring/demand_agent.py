@@ -51,7 +51,6 @@ def load_supplier_file(supplier_name: str, file_path: str) -> Optional[str]:
         else:
             return None
     except Exception as e:
-        print(f"Error loading file {full_path}: {e}")
         return None
 
 
@@ -192,12 +191,8 @@ def extract_demand_insights(
 @demand_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent on startup"""
-    ctx.logger.info("Demand Forecast Agent starting up...")
-    ctx.logger.info(f"Agent address: {demand_agent.address}")
-
     # Load demand forecast prompt
     ctx.storage.set("demand_prompt", DEMAND_FORECASE_PROMPT)
-    ctx.logger.info("Demand forecast prompt loaded!")
 
     # Initialize request trace for debugging
     ctx.storage.set(
@@ -208,13 +203,11 @@ async def startup(ctx: Context):
         },
     )
 
-    ctx.logger.info("Listening for DemandRequest messages...")
-
 
 @demand_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info("Demand Forecast Agent shutting down...")
+    pass
 
 
 @demand_protocol.on_message(model=DemandRequest, replies=DemandResponse)
@@ -228,10 +221,6 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
     3. Extract demand insights based on demand_prompt guidelines
     4. Return demand forecast update to orchestrator
     """
-    ctx.logger.info(f"Received DemandRequest from {sender}")
-    ctx.logger.info(f"   Request ID: {msg.request_id}")
-    ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-
     try:
         # Load supplier data from files
         compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
@@ -240,7 +229,6 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
 
         # Check if supplier files exist
         if not compliance_data and not risk_data and not financial_data:
-            ctx.logger.warning(f"Supplier '{msg.supplier_name}' data files not found")
 
             # Return response indicating supplier not found
             response = DemandResponse(
@@ -277,12 +265,8 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
                 timestamp="",
             )
 
-        ctx.logger.info("Demand forecast analysis complete!")
-
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
-
-        ctx.logger.info(f"Sent DemandResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing demand request: {e}")

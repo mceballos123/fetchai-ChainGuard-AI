@@ -51,7 +51,6 @@ def load_supplier_file(supplier_name: str, file_path: str) -> Optional[str]:
         else:
             return None
     except Exception as e:
-        print(f"Error loading file {full_path}: {e}")
         return None
 
 
@@ -203,12 +202,8 @@ def extract_logistics_insights(
 @logistics_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent on startup"""
-    ctx.logger.info("Logistics Agent starting up...")
-    ctx.logger.info(f"Agent address: {logistics_agent.address}")
-
     # Load logistics prompt
     ctx.storage.set("logistics_prompt", LOGISTICS_PROMPT)
-    ctx.logger.info("Logistics prompt loaded!")
 
     # Initialize request trace for debugging
     ctx.storage.set(
@@ -219,13 +214,11 @@ async def startup(ctx: Context):
         },
     )
 
-    ctx.logger.info("Listening for LogisticsRequest messages...")
-
 
 @logistics_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info("Logistics Agent shutting down...")
+    pass
 
 
 @logistics_protocol.on_message(model=LogisticsRequest, replies=LogisticsResponse)
@@ -239,10 +232,6 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
     3. Extract inventory and logistics insights based on logistics_prompt guidelines
     4. Return inventory monitoring update to orchestrator
     """
-    ctx.logger.info(f"Received LogisticsRequest from {sender}")
-    ctx.logger.info(f"   Request ID: {msg.request_id}")
-    ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-
     try:
         # Load supplier data from files
         compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
@@ -251,7 +240,6 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
 
         # Check if supplier files exist
         if not compliance_data and not risk_data and not financial_data:
-            ctx.logger.warning(f"Supplier '{msg.supplier_name}' data files not found")
 
             # Return response indicating supplier not found
             response = LogisticsResponse(
@@ -292,12 +280,8 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
                 timestamp="",
             )
 
-        ctx.logger.info("Logistics analysis complete!")
-
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
-
-        ctx.logger.info(f"Sent LogisticsResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing logistics request: {e}")

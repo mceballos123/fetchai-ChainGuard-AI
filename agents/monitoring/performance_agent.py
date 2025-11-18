@@ -51,7 +51,6 @@ def load_supplier_file(supplier_name: str, file_path: str) -> Optional[str]:
         else:
             return None
     except Exception as e:
-        print(f"Error loading file {full_path}: {e}")
         return None
 
 
@@ -164,12 +163,8 @@ def extract_monitoring_insights(
 @performance_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent on startup"""
-    ctx.logger.info("Performance Monitoring Agent starting up...")
-    ctx.logger.info(f"Agent address: {performance_agent.address}")
-
     # Load performance prompt
     ctx.storage.set("performance_prompt", PROMPT)
-    ctx.logger.info("Performance monitoring prompt loaded!")
 
     # Initialize request trace for debugging
     ctx.storage.set(
@@ -180,13 +175,11 @@ async def startup(ctx: Context):
         },
     )
 
-    ctx.logger.info("Listening for PerformanceRequest messages...")
-
 
 @performance_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info("Performance Monitoring Agent shutting down...")
+    pass
 
 
 @performance_protocol.on_message(model=PerformanceRequest, replies=PerformanceResponse)
@@ -202,10 +195,6 @@ async def handle_performance_request(
     3. Extract monitoring insights based on performance_prompt guidelines
     4. Return performance update to orchestrator
     """
-    ctx.logger.info(f"Received PerformanceRequest from {sender}")
-    ctx.logger.info(f"   Request ID: {msg.request_id}")
-    ctx.logger.info(f"   Supplier: {msg.supplier_name}")
-
     try:
         # Load supplier data from files
         compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
@@ -214,7 +203,6 @@ async def handle_performance_request(
 
         # Check if supplier files exist
         if not compliance_data and not risk_data and not financial_data:
-            ctx.logger.warning(f"Supplier '{msg.supplier_name}' data files not found")
 
             # Return response indicating supplier not found
             response = PerformanceResponse(
@@ -255,12 +243,8 @@ async def handle_performance_request(
                 timestamp="",
             )
 
-        ctx.logger.info("Performance monitoring analysis complete!")
-
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
-
-        ctx.logger.info(f"Sent PerformanceResponse to {sender}")
 
     except Exception as e:
         ctx.logger.error(f"Error processing performance request: {e}")
