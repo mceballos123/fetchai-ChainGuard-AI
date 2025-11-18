@@ -5,16 +5,16 @@ import os
 from datetime import datetime
 
 # Import models
-from backend.models.risk import RiskRequest, RiskResponse
+from models.risk import RiskRequest, RiskResponse
 from dotenv import load_dotenv
-from backend.langgraph_logic.risk_langgraph import (
+from langgraph_logic.risk_langgraph import (
     RiskRAGSystem,
     build_risk_workflow,
 )
-from backend.langgraph_logic.state_schemas import SupplierWorkflowState
+from langgraph_logic.state_schemas import SupplierWorkflowState
 
 # Import test utilities
-from backend.test_func import (
+from test_func.compliance_helpers import (
     verify_risk_connection,
     validate_risk_response_before_sending,
 )

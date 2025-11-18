@@ -16,15 +16,15 @@ from uagents_core.contrib.protocols.chat import (
 )
 
 # Import compliance, financial, risk, performance, demand, and logistics models
-from backend.models.compliance import ComplianceRequest, ComplianceResponse
-from backend.models.financial import FinancialRequest, FinancialResponse
-from backend.models.risk import RiskRequest, RiskResponse
-from backend.models.performance import PerformanceRequest, PerformanceResponse
-from backend.models.demand import DemandRequest, DemandResponse
-from backend.models.logistics import LogisticsRequest, LogisticsResponse
+from models.compliance import ComplianceRequest, ComplianceResponse
+from models.financial import FinancialRequest, FinancialResponse
+from models.risk import RiskRequest, RiskResponse
+from models.performance import PerformanceRequest, PerformanceResponse
+from models.demand import DemandRequest, DemandResponse
+from models.logistics import LogisticsRequest, LogisticsResponse
 
 # Import test utilities
-from backend.test_func import (
+from test_func.orchestrator_helpers import (
     verify_orchestrator_connection,
     log_message_transmission,
     validate_request_before_sending,

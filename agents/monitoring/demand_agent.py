@@ -4,8 +4,8 @@ import json
 from typing import Dict, Any, Optional
 
 # Import models
-from backend.models.demand import DemandRequest, DemandResponse
-from backend.prompts.demand_prompt import DEMAND_FORECASE_PROMPT
+from models.demand import DemandRequest, DemandResponse
+from prompts.demand_prompt import DEMAND_FORECASE_PROMPT
 from dotenv import load_dotenv
 
 load_dotenv()

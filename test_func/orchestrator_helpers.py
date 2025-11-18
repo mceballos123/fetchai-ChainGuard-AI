@@ -9,7 +9,7 @@ from typing import Dict, Any, Tuple
 from datetime import datetime
 from uagents import Context
 
-from backend.models.compliance import ComplianceRequest
+from models.compliance import ComplianceRequest
 from .test_agent_communication import verify_compliance_request_format
 
 

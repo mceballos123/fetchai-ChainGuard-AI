@@ -3,10 +3,9 @@ import os
 import json
 from typing import Dict, Any, Optional
 
-# /Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/monitoring/performance_agent.py
 # Import models
-from backend.models.performance import PerformanceRequest, PerformanceResponse
-from backend.prompts.performance_prompt import PROMPT
+from models.performance import PerformanceRequest, PerformanceResponse
+from prompts.performance_prompt import PROMPT
 from dotenv import load_dotenv
 
 load_dotenv()
