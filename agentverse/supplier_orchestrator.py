@@ -22,6 +22,7 @@ from models.risk import RiskRequest, RiskResponse
 from models.performance import PerformanceRequest, PerformanceResponse
 from models.demand import DemandRequest, DemandResponse
 from models.logistics import LogisticsRequest, LogisticsResponse
+from models.find_supplier import FindSupplierRequest, FindSupplierResponse
 
 # Import test utilities
 from test_func.orchestrator_helpers import (
@@ -61,6 +62,9 @@ DEMAND_AGENT_ADDRESS = os.getenv(
 LOGISTICS_AGENT_ADDRESS = os.getenv(
     "LOGISTICS_AGENT_ADDRESS",
 )
+FIND_SUPPLIER_AGENT_ADDRESS = os.getenv(
+    "FIND_SUPPLIER_AGENT_ADDRESS",
+)
 
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
@@ -72,6 +76,7 @@ async def startup(ctx: Context):
 
     ctx.logger.info(f"Agent Name: {ctx.agent.name}")
     ctx.logger.info(f"Agent Address: {ctx.agent.address}")
+    ctx.logger.info(f"Find Supplier Agent: {FIND_SUPPLIER_AGENT_ADDRESS}")
     ctx.logger.info(f"Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
     ctx.logger.info(f"Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
     ctx.logger.info(f"Risk Agent: {RISK_AGENT_ADDRESS}")
@@ -307,14 +312,15 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
         return
 
-    # Step 6: FIND SUPPLIER MODE - Forward to all 3 agents in parallel
+    # Step 6: FIND SUPPLIER MODE - First forward to find_supplier agent
     ctx.logger.info("=" * 70)
-    ctx.logger.info("FORWARDING TO COMPLIANCE, FINANCIAL, AND RISK AGENTS")
+    ctx.logger.info("FIND SUPPLIER MODE - FORWARDING TO FIND SUPPLIER AGENT")
     ctx.logger.info("=" * 70)
 
     # Initialize pending responses tracking for this request
     pending_responses = ctx.storage.get("pending_responses") or {}
     pending_responses[msg_id] = {
+        "find_supplier_response": None,
         "compliance_response": None,
         "financial_response": None,
         "risk_response": None,
@@ -324,6 +330,91 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
     }
     ctx.storage.set("pending_responses", pending_responses)
 
+    # Extract business category from user query
+    user_query_lower = user_query.lower()
+    business_category = "general"
+
+    # Try to identify business category
+    category_keywords = {
+        "coffee": "coffee",
+        "pizza": "pizza",
+        "chocolate": "chocolate",
+        "food": "food",
+        "restaurant": "restaurant",
+        "clothing": "clothing",
+        "apparel": "clothing",
+        "fashion": "fashion",
+        "tea": "tea",
+        "bakery": "bakery",
+        "furniture": "furniture",
+        "technology": "technology",
+        "software": "software",
+    }
+
+    for keyword, category in category_keywords.items():
+        if keyword in user_query_lower:
+            business_category = category
+            break
+
+    try:
+        # Send to Find Supplier Agent first
+        ctx.logger.info(
+            f"Sending to Find Supplier Agent: {FIND_SUPPLIER_AGENT_ADDRESS}"
+        )
+        find_supplier_request = FindSupplierRequest(
+            request_id=msg_id,
+            user_query=user_query,
+            business_category=business_category,
+            timestamp="",
+        )
+
+        await ctx.send(FIND_SUPPLIER_AGENT_ADDRESS, find_supplier_request)
+
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "FindSupplierRequest",
+            msg_id,
+            {
+                "user_query": user_query,
+                "business_category": business_category,
+            },
+        )
+
+        ctx.logger.info(f"FindSupplierRequest sent to Find Supplier Agent")
+        ctx.logger.info(f"Category: {business_category}")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("WAITING FOR FIND SUPPLIER RESPONSE...")
+        ctx.logger.info("=" * 70)
+
+        # NOTE: We'll wait for find_supplier response before forwarding to the 3 analysis agents
+        # For now, we just send to find_supplier and will handle the response separately
+
+    except Exception as e:
+        ctx.logger.error(f"Error sending to find_supplier agent: {e}")
+
+        # Clean up pending responses
+        pending_responses.pop(msg_id, None)
+        ctx.storage.set("pending_responses", pending_responses)
+
+        # Send error response to user
+        error_response = ChatMessage(
+            timestamp="",
+            msg_id=uuid4(),
+            content=[
+                TextContent(
+                    type="text",
+                    text=f"Error forwarding request to find_supplier agent: {str(e)}",
+                )
+            ],
+        )
+        await ctx.send(sender, error_response)
+        log_message_transmission(
+            ctx, "SENT", "ChatMessage", str(error_response.msg_id), {"type": "error"}
+        )
+
+    # COMMENTED OUT FOR NOW - Will send to these agents after receiving find_supplier response
+    """
     try:
         # Send to Compliance Agent
         ctx.logger.info(f"Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
@@ -429,6 +520,7 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         log_message_transmission(
             ctx, "SENT", "ChatMessage", str(error_response.msg_id), {"type": "error"}
         )
+    """
 
 
 @chat_proto.on_message(ChatAcknowledgement)
@@ -507,6 +599,170 @@ demand_protocol = Protocol(name="demand_response_protocol", version="1.0")
 
 # Add Logistics Response Protocol
 logistics_protocol = Protocol(name="logistics_response_protocol", version="1.0")
+
+# Add Find Supplier Response Protocol
+find_supplier_protocol = Protocol(name="find_supplier_response_protocol", version="1.0")
+
+
+@find_supplier_protocol.on_message(model=FindSupplierResponse)
+async def handle_find_supplier_response(
+    ctx: Context, sender: str, msg: FindSupplierResponse
+):
+    """Handle find supplier response and send result to user"""
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📥 RECEIVED FIND SUPPLIER RESPONSE")
+    ctx.logger.info("=" * 70)
+
+    log_message_transmission(
+        ctx,
+        "RECEIVED",
+        "FindSupplierResponse",
+        msg.request_id,
+        {
+            "success": msg.success,
+            "search_category": msg.search_category,
+            "total_results": msg.total_results_found,
+        },
+    )
+
+    try:
+        # Get pending response tracking
+        pending_responses = ctx.storage.get("pending_responses") or {}
+
+        if msg.request_id not in pending_responses:
+            ctx.logger.warning(
+                f"No pending response tracking for request {msg.request_id}"
+            )
+            return
+
+        # Store find_supplier response
+        pending_responses[msg.request_id]["find_supplier_response"] = msg.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
+
+        user_sender = pending_responses[msg.request_id].get("sender")
+
+        if not user_sender:
+            ctx.logger.error(f"No sender found for request {msg.request_id}")
+            return
+
+        # Check if search was successful
+        if not msg.success:
+            ctx.logger.error(f"❌ Find supplier search failed: {msg.error_message}")
+
+            # Send error message to user
+            error_response = ChatMessage(
+                timestamp="",
+                msg_id=uuid4(),
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"❌ Supplier Search Failed\n\nCategory: {msg.search_category}\nError: {msg.error_message}\n\nPlease try a different search term.",
+                    ),
+                    EndSessionContent(type="end-session"),
+                ],
+            )
+
+            await ctx.send(user_sender, error_response)
+
+            # Clean up
+            pending_responses.pop(msg.request_id, None)
+            ctx.storage.set("pending_responses", pending_responses)
+
+            return
+
+        # Search was successful
+        best_supplier = msg.best_supplier
+
+        if not best_supplier:
+            ctx.logger.warning("⚠️ No supplier found in successful response")
+
+            no_results_response = ChatMessage(
+                timestamp="",
+                msg_id=uuid4(),
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"⚠️ No Suppliers Found\n\nCategory: {msg.search_category}\nWe couldn't find any B Corporation certified companies matching your search.\n\nPlease try a different category or search term.",
+                    ),
+                    EndSessionContent(type="end-session"),
+                ],
+            )
+
+            await ctx.send(user_sender, no_results_response)
+
+            # Clean up
+            pending_responses.pop(msg.request_id, None)
+            ctx.storage.set("pending_responses", pending_responses)
+
+            return
+
+        # Build successful response message
+        ctx.logger.info(f"✅ Best Supplier Found: {best_supplier.company_name}")
+        ctx.logger.info(f"Location: {best_supplier.location}")
+        ctx.logger.info(f"Industry: {best_supplier.industry}")
+        ctx.logger.info(f"Total Results: {msg.total_results_found}")
+
+        response_text = f"""
+✅ SUPPLIER FOUND
+
+We found {msg.total_results_found} B Corporation certified companies in the {msg.search_category} category.
+
+TOP RECOMMENDED SUPPLIER:
+
+Company Name: {best_supplier.company_name}
+Location: {best_supplier.location}
+Industry: {best_supplier.industry}
+Description: {best_supplier.description}
+
+B Corp Profile: {best_supplier.b_corp_profile_url}
+
+---
+
+NEXT STEPS:
+This supplier will now be analyzed by our compliance, financial, and risk management teams to ensure they meet all partnership requirements.
+
+(Note: In the future, this analysis will happen automatically. For now, we're showing you the supplier we found.)
+        """
+
+        # Send response to user
+        success_response = ChatMessage(
+            timestamp="",
+            msg_id=uuid4(),
+            content=[
+                TextContent(type="text", text=response_text.strip()),
+                EndSessionContent(type="end-session"),
+            ],
+        )
+
+        await ctx.send(user_sender, success_response)
+
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "ChatMessage",
+            str(success_response.msg_id),
+            {
+                "type": "find_supplier_success",
+                "supplier": best_supplier.company_name,
+            },
+        )
+
+        ctx.logger.info("✅ Find supplier result sent to user")
+        ctx.logger.info("=" * 70)
+
+        # Clean up session
+        active_sessions = ctx.storage.get("active_sessions") or {}
+        active_sessions.pop(msg.request_id, None)
+        ctx.storage.set("active_sessions", active_sessions)
+
+        pending_responses.pop(msg.request_id, None)
+        ctx.storage.set("pending_responses", pending_responses)
+
+    except Exception as e:
+        ctx.logger.error(f"❌ Error handling find supplier response: {e}")
+        import traceback
+
+        traceback.print_exc()
 
 
 @financial_protocol.on_message(model=FinancialResponse)
@@ -622,7 +878,7 @@ async def handle_demand_response(ctx: Context, sender: str, msg: DemandResponse)
 
     try:
         # Store demand response in pending_responses
-        pending_responses = ctx.storage.get("pending_responses") #or {}
+        pending_responses = ctx.storage.get("pending_responses")  # or {}
 
         if msg.request_id not in pending_responses:
             ctx.logger.warning(
@@ -670,7 +926,7 @@ async def handle_performance_response(
 
     try:
         # Store performance response in pending_responses
-        pending_responses = ctx.storage.get("pending_responses") #or {}
+        pending_responses = ctx.storage.get("pending_responses")  # or {}
 
         if msg.request_id not in pending_responses:
             ctx.logger.warning(
@@ -704,7 +960,7 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
     ctx.logger.info("=" * 60)
 
     # Verify message received from Logistics Agent
-   
+
     ctx.logger.info(f"Logistics Response for request_id: {msg.request_id}")
     log_message_transmission(
         ctx,
@@ -719,7 +975,7 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
 
     try:
         # Store logistics response in pending_responses
-        pending_responses = ctx.storage.get("pending_responses") #or {}
+        pending_responses = ctx.storage.get("pending_responses")  # or {}
         ctx.logger.info(f"Pending responses: {pending_responses}")
 
         if msg.request_id not in pending_responses:
@@ -729,7 +985,9 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
             return
 
         pending_responses[msg.request_id]["logistics_response"] = msg.model_dump()
-        ctx.logger.info(f"Logistics response stored: {pending_responses[msg.request_id]['logistics_response']}")
+        ctx.logger.info(
+            f"Logistics response stored: {pending_responses[msg.request_id]['logistics_response']}"
+        )
         ctx.storage.set("pending_responses", pending_responses)
 
         ctx.logger.info(f"Logistics response stored")
@@ -1171,6 +1429,7 @@ async def handle_acknowledgement(ctx: Context, sender: str, msg: ChatAcknowledge
 
 
 supplier_orchestrator.include(chat_proto, publish_manifest=True)
+supplier_orchestrator.include(find_supplier_protocol, publish_manifest=True)
 supplier_orchestrator.include(compliance_protocol, publish_manifest=True)
 supplier_orchestrator.include(financial_protocol, publish_manifest=True)
 supplier_orchestrator.include(risk_protocol, publish_manifest=True)
