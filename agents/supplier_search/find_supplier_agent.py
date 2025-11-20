@@ -1,8 +1,4 @@
-from uagents import Agent, Context, Protocol
-import os
-import re
-import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, TypedDict
 from dotenv import load_dotenv
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -11,14 +7,20 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import requests
-
-# Import models
+from langgraph.graph import StateGraph, START, END
+from uagents import Agent, Context, Protocol
 from models.find_supplier import (
     FindSupplierRequest,
     FindSupplierResponse,
     SupplierSearchResult,
 )
+
+import os
+import re
+import time
+import asyncio
+import requests
+
 
 load_dotenv()
 
@@ -30,6 +32,156 @@ find_supplier_agent = Agent(
 )
 
 find_supplier_protocol = Protocol(name="find_supplier_protocol", version="1.0")
+
+
+class SupplierSearchState(TypedDict):
+    """State for LangGraph workflow"""
+
+    request_id: str
+    user_query: str
+    business_category: str
+    search_category: str
+    search_result: Optional[Dict[str, Any]]
+    best_supplier: Optional[SupplierSearchResult]
+    success: bool
+    error_message: Optional[str]
+    search_summary: str
+    ctx: Optional[Context]
+
+
+def find_supplier_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 1: Find supplier by searching B Corp directory"""
+    ctx = state["ctx"]
+    search_category = state["search_category"]
+
+    ctx.logger.info(f"[LangGraph Node: find_supplier] Searching for: {search_category}")
+
+    
+
+    search_result = asyncio.run(
+        search_b_corp_directory(ctx, search_category, max_results=1)
+    )
+    
+    ctx.logger.info(f"Search result: {search_result}")
+
+    if not search_result.get("success"):
+        return {
+            **state,
+            "success": False,
+            "error_message": search_result.get("error", "Unknown error occurred"),
+            "search_summary": "Failed to search B Corporation directory",
+        }
+
+    return {
+        **state,
+        "search_result": search_result,
+        "success": search_result.get("success", False),
+    }
+
+
+def process_results_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 2: Process search results and select best supplier"""
+    ctx = state["ctx"]
+    search_result = state["search_result"]
+
+    ctx.logger.info("[LangGraph Node: process_results] Processing search results")
+
+    if not search_result or not search_result.get("success"):
+        error_msg = (
+            search_result.get("error", "Unknown error occurred")
+            if search_result
+            else "Search failed"
+        )
+        return {
+            **state,
+            "success": False,
+            "error_message": error_msg,
+            "search_summary": "Failed to search B Corporation directory",
+        }
+
+    results = search_result.get("results", [])
+
+    if not results:
+        return {
+            **state,
+            "success": False,
+            "error_message": f"No suppliers found in category: {state['search_category']}",
+            "search_summary": f"No B Corporation certified companies found for '{state['search_category']}'",
+        }
+
+    best_supplier = select_best_supplier(ctx, results, state["user_query"])
+    search_summary = f"Found B Corporation certified company in the {state['search_category']} category: {best_supplier.company_name}"
+
+    return {
+        **state,
+        "best_supplier": best_supplier,
+        "success": True,
+        "search_summary": search_summary,
+    }
+
+
+def supplier_found_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 3: Handle successful supplier found"""
+    ctx = state["ctx"]
+    best_supplier = state["best_supplier"]
+
+    ctx.logger.info(
+        f"[LangGraph Node: supplier_found] ✓ Supplier found: {best_supplier.company_name}"
+    )
+    ctx.logger.info(f"  Location: {best_supplier.location}")
+    ctx.logger.info(f"  Industry: {best_supplier.industry}")
+    ctx.logger.info(f"  Summary: {state['search_summary']}")
+
+    return state
+
+
+def supplier_not_found_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 4: Handle supplier not found"""
+    ctx = state["ctx"]
+
+    ctx.logger.warning(f"[LangGraph Node: supplier_not_found] ✗ Supplier not found")
+    ctx.logger.warning(f"  Category: {state['search_category']}")
+    ctx.logger.warning(f"  Error: {state.get('error_message', 'No results')}")
+
+    return state
+
+
+def route_search_results(state: SupplierSearchState) -> str:
+    """Conditional routing: supplier found or not found"""
+    if state.get("success") and state.get("best_supplier"):
+        return "supplier_found"
+    else:
+        return "supplier_not_found"
+
+
+def build_supplier_search_graph() -> StateGraph:
+    """Build the LangGraph workflow for supplier search"""
+    workflow = StateGraph(SupplierSearchState)
+
+    workflow.add_node("find_supplier", find_supplier_node)
+    workflow.add_node("process_results", process_results_node)
+    workflow.add_node("supplier_found", supplier_found_node)
+    workflow.add_node("supplier_not_found", supplier_not_found_node)
+
+    workflow.add_edge(START, "find_supplier")
+    workflow.add_edge("find_supplier", "process_results")
+
+    workflow.add_conditional_edges(
+        "process_results",
+        route_search_results,
+        {
+            "supplier_found": "supplier_found",
+            "supplier_not_found": "supplier_not_found",
+        },
+    )
+
+    workflow.add_edge("supplier_found", END)
+    workflow.add_edge("supplier_not_found", END)
+
+    return workflow.compile()
+
+
+supplier_search_graph = build_supplier_search_graph()
 
 
 @find_supplier_agent.on_event("startup")
@@ -123,8 +275,8 @@ def extract_business_category(user_query: str) -> str:
 
     return "general"
 
-
-async def search_b_corp_directory(
+# was async, changed to sync
+def search_b_corp_directory(
     ctx: Context, category: str, max_results: int = 1
 ) -> Dict[str, Any]:
     driver = None
@@ -284,6 +436,9 @@ async def handle_find_supplier_request(
     ctx: Context, sender: str, msg: FindSupplierRequest
 ):
     ctx.logger.info(f"Received request {msg.request_id}: {msg.user_query}")
+    ctx.logger.info("=" * 60)
+    ctx.logger.info("Starting LangGraph Supplier Search Workflow")
+    ctx.logger.info("=" * 60)
 
     try:
         processed_ids = ctx.storage.get("processed_request_ids") or []
@@ -300,66 +455,63 @@ async def handle_find_supplier_request(
             else extract_business_category(msg.user_query)
         )
 
-        search_result = await search_b_corp_directory(
-            ctx, search_category, max_results=1
-        )
+        initial_state: SupplierSearchState = {
+            "request_id": msg.request_id,
+            "user_query": msg.user_query,
+            "business_category": msg.business_category,
+            "search_category": search_category,
+            "search_result": None,
+            "best_supplier": None,
+            "success": False,
+            "error_message": None,
+            "search_summary": "",
+            "ctx": ctx,
+        }
 
-        if not search_result["success"]:
+        ctx.logger.info(f"Executing LangGraph workflow for category: {search_category}")
+        final_state = supplier_search_graph.invoke(initial_state)
+
+        ctx.logger.info("=" * 60)
+        ctx.logger.info("LangGraph Workflow Completed")
+        ctx.logger.info("=" * 60)
+
+        if final_state["success"] and final_state["best_supplier"]:
+            best_supplier = final_state["best_supplier"]
+
+            response = FindSupplierResponse(
+                request_id=msg.request_id,
+                success=True,
+                best_supplier=best_supplier,
+                alternative_suppliers=[],
+                search_category=search_category,
+                total_results_found=1,
+                search_summary=final_state["search_summary"],
+            )
+
+            search_history = ctx.storage.get("search_history") or []
+            search_history.append(
+                {
+                    "request_id": msg.request_id,
+                    "category": search_category,
+                    "selected_supplier": best_supplier.company_name,
+                }
+            )
+            ctx.storage.set("search_history", search_history)
+
+            ctx.logger.info(f"Sending success response: {best_supplier.company_name}")
+            await ctx.send(sender, response)
+        else:
             error_response = FindSupplierResponse(
                 request_id=msg.request_id,
                 success=False,
                 search_category=search_category,
                 total_results_found=0,
-                search_summary="Failed to search B Corporation directory",
-                error_message=search_result.get("error", "Unknown error occurred"),
+                search_summary=final_state.get("search_summary", "Supplier not found"),
+                error_message=final_state.get("error_message", "No suppliers found"),
             )
 
+            ctx.logger.error(f"Sending error response: {error_response.error_message}")
             await ctx.send(sender, error_response)
-            ctx.logger.error(f"Search failed: {error_response.error_message}")
-            return
-
-        results = search_result["results"]
-        total_found = search_result["total_found"]
-
-        if not results:
-            no_results_response = FindSupplierResponse(
-                request_id=msg.request_id,
-                success=False,
-                search_category=search_category,
-                total_results_found=0,
-                search_summary=f"No B Corporation certified companies found for '{search_category}'",
-                error_message=f"No suppliers found in category: {search_category}",
-            )
-
-            await ctx.send(sender, no_results_response)
-            ctx.logger.warning(f"No results for: {search_category}")
-            return
-
-        best_supplier = select_best_supplier(ctx, results, msg.user_query)
-        search_summary = f"Found B Corporation certified company in the {search_category} category: {best_supplier.company_name}"
-
-        response = FindSupplierResponse(
-            request_id=msg.request_id,
-            success=True,
-            best_supplier=best_supplier,
-            alternative_suppliers=[],
-            search_category=search_category,
-            total_results_found=1,
-            search_summary=search_summary,
-        )
-
-        search_history = ctx.storage.get("search_history") or []
-        search_history.append(
-            {
-                "request_id": msg.request_id,
-                "category": search_category,
-                "selected_supplier": best_supplier.company_name,
-            }
-        )
-        ctx.storage.set("search_history", search_history)
-
-        ctx.logger.info(f"Sending response: {best_supplier.company_name}")
-        await ctx.send(sender, response)
 
     except Exception as e:
         ctx.logger.error(f"Error processing request: {e}")
