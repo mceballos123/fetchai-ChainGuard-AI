@@ -1,43 +1,33 @@
 from uagents import Model
-from pydantic import Field
-from typing import Optional
+from typing import Optional, List
 
 
 class FindSupplierRequest(Model):
     """Request to find a supplier from B Corporation directory"""
 
-    request_id: str = Field(..., description="Unique request identifier")
-    user_query: str = Field(
-        ..., description="User's search query describing what they're looking for"
-    )
-    business_category: str = Field(
-        ..., description="Business category to search (e.g., coffee, pizza, food)"
-    )
-    timestamp: str = Field(default="", description="Request timestamp")
+    request_id: str
+    user_query: str
+    business_category: str
 
 
 class SupplierSearchResult(Model):
     """Individual supplier search result from B Corp directory"""
 
-    company_name: str = Field(..., description="Name of the B Corporation company")
-    location: str = Field(default="", description="Company location")
-    industry: str = Field(default="", description="Industry/business category")
-    b_corp_profile_url: str = Field(default="", description="URL to B Corp profile")
-    description: str = Field(default="", description="Brief description of the company")
+    company_name: str
+    location: str = ""
+    industry: str = ""
+    b_corp_profile_url: str = ""
+    description: str = ""
 
 
 class FindSupplierResponse(Model):
     """Response with the best supplier found from B Corp directory"""
 
-    request_id: str = Field(..., description="Original request identifier")
-    success: bool = Field(..., description="Whether search was successful")
-    best_supplier: Optional[SupplierSearchResult] = Field(
-        default=None, description="Top recommended supplier"
-    )
-    search_category: str = Field(default="", description="Category that was searched")
-    total_results_found: int = Field(
-        default=0, description="Total number of results found"
-    )
-    search_summary: str = Field(default="", description="Summary of the search results")
-    timestamp: str = Field(default="", description="Response timestamp")
-    error_message: str = Field(default="", description="Error message if search failed")
+    request_id: str
+    success: bool
+    best_supplier: Optional[SupplierSearchResult] = None
+    alternative_suppliers: List[SupplierSearchResult] = []
+    search_category: str = ""
+    total_results_found: int = 0
+    search_summary: str = ""
+    error_message: str = ""

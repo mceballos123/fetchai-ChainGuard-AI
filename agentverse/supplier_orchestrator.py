@@ -63,7 +63,7 @@ LOGISTICS_AGENT_ADDRESS = os.getenv(
     "LOGISTICS_AGENT_ADDRESS",
 )
 FIND_SUPPLIER_AGENT_ADDRESS = os.getenv(
-    "FIND_SUPPLIER_AGENT_ADDRESS",
+    "FIND_SUPPLIER_ADDRESS",
 )
 
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
@@ -705,9 +705,9 @@ async def handle_find_supplier_response(
         response_text = f"""
 ✅ SUPPLIER FOUND
 
-We found {msg.total_results_found} B Corporation certified companies in the {msg.search_category} category.
+We found a B Corporation certified company in the {msg.search_category} category.
 
-TOP RECOMMENDED SUPPLIER:
+SELECTED SUPPLIER:
 
 Company Name: {best_supplier.company_name}
 Location: {best_supplier.location}

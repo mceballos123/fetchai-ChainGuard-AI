@@ -31,6 +31,8 @@ pinecone-client
 
 sentry-sdk
 requests
+beautifulsoup4
+selenium
 
 pytest
 pytest-asyncio
