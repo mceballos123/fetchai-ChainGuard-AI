@@ -35,7 +35,7 @@ async def startup(ctx: Context):
 
     await asyncio.sleep(2)
 
-    test_queries = ["I need a tire supplier"]
+    test_queries = ["I need a pizza supplier"]
 
     for idx, query in enumerate(test_queries, 1):
         ctx.logger.info(f"\nTest {idx}/{len(test_queries)}: {query}")
