@@ -5,6 +5,13 @@ from langgraph_logic.state_schemas import SupplierWorkflowState
 import os
 import json
 import re
+import time
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 from dotenv import load_dotenv
 from uagents import Context
@@ -65,7 +72,7 @@ EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
 
 
 class ComplianceRAGSystem:
-    """RAG system for compliance document retrieval and analysis using local files"""
+    """RAG system for compliance document retrieval and analysis using B Corp web scraping"""
 
     def __init__(self):
         self.initialized = False
@@ -85,25 +92,128 @@ class ComplianceRAGSystem:
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
 
         self.documents = []
+        self.scraped_supplier_data = {}
+
+    async def scrape_bcorp_supplier_page(
+        self, ctx: Context, supplier_name: str, company_url: str
+    ) -> Dict[str, str]:
+        """
+        Scrape B Corp supplier page for ethics and sustainability information.
+        Extracts data from multiple tabs: Governance, Workers, Community, Environment, Customers
+
+        Args:
+            supplier_name: Name of the supplier
+            company_url: B Corp profile URL
+
+        Returns:
+            Dictionary with scraped data from all tabs
+        """
+        driver = None
+        try:
+            ctx.logger.info(f"Scraping B Corp page for: {supplier_name}")
+            ctx.logger.info(f"URL: {company_url}")
+
+            chrome_options = Options()
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument(
+                "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            )
+
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            driver.get(company_url)
+            time.sleep(5)
+
+            scraped_data = {
+                "supplier_name": supplier_name,
+                "url": company_url,
+                "governance": "",
+                "workers": "",
+                "community": "",
+                "environment": "",
+                "customers": "",
+                "overall_score": "",
+            }
+
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+
+            # Extract Overall B Impact Score
+            score_element = soup.find("div", class_=re.compile(".*score.*", re.I))
+            if score_element:
+                score_text = score_element.get_text(strip=True)
+                scraped_data["overall_score"] = score_text
+                ctx.logger.info(f"Overall Score: {score_text}")
+
+            # Tab sections to scrape
+            tabs = ["Governance", "Workers", "Community", "Environment", "Customers"]
+
+            for tab in tabs:
+                try:
+                    ctx.logger.info(f"Scraping {tab} tab...")
+
+                    # Try to find and click the tab button
+                    tab_button = driver.find_element(
+                        By.XPATH, f"//button[contains(text(), '{tab}')]"
+                    )
+                    driver.execute_script("arguments[0].click();", tab_button)
+                    time.sleep(2)
+
+                    # Get updated page content
+                    tab_soup = BeautifulSoup(driver.page_source, "html.parser")
+
+                    # Extract tab content
+                    content_div = tab_soup.find("div", {"role": "tabpanel"})
+                    if content_div:
+                        tab_content = content_div.get_text(separator=" ", strip=True)
+                        scraped_data[tab.lower()] = tab_content[
+                            :2000
+                        ]  # Limit to 2000 chars
+                        ctx.logger.info(
+                            f"Extracted {len(tab_content)} characters from {tab}"
+                        )
+                    else:
+                        ctx.logger.warning(f"Could not find content for {tab} tab")
+
+                except Exception as e:
+                    ctx.logger.warning(f"Error scraping {tab} tab: {e}")
+                    continue
+
+            if driver:
+                driver.quit()
+
+            ctx.logger.info(f"Successfully scraped B Corp data for {supplier_name}")
+            return scraped_data
+
+        except Exception as e:
+            ctx.logger.error(f"Error scraping B Corp page: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+            return {
+                "supplier_name": supplier_name,
+                "url": company_url,
+                "error": str(e),
+            }
 
     async def initialize(self, ctx: Context) -> bool:
 
         try:
             ctx.logger.info("Initializing Compliance RAG System...")
 
-            # Step 1: Load compliance files
-            ctx.logger.info(f"Loading compliance files from {COMPLIANCE_FILES_DIR}")
-            if not await self._load_compliance_files(ctx):
-                return False
-
-            # Step 2: Initialize Pinecone
+            # Step 1: Initialize Pinecone (don't load local files anymore)
             ctx.logger.info("Initializing Pinecone vector store...")
             if not await self._setup_pinecone(ctx):
-                return False
-
-            # Step 3: Index documents in Pinecone
-            ctx.logger.info("Indexing compliance documents...")
-            if not await self._index_documents(ctx):
                 return False
 
             self.initialized = True
@@ -381,22 +491,54 @@ class ComplianceRAGSystem:
             ctx.logger.error(f"Error indexing documents: {e}")
             return False
 
+    async def _index_scraped_document(self, ctx: Context, document: Document) -> bool:
+        """Index a single scraped document in Pinecone"""
+        try:
+            if not self.index:
+                ctx.logger.error("Index not initialized")
+                return False
+
+            # Parse document into nodes (chunks)
+            parser = SimpleNodeParser.from_defaults(
+                chunk_size=512,
+                chunk_overlap=20,
+            )
+
+            nodes = parser.get_nodes_from_documents([document])
+            ctx.logger.info(f"Created {len(nodes)} chunks from scraped data")
+
+            # Index nodes in Pinecone
+            for node in nodes:
+                try:
+                    self.index.insert_nodes([node])
+                except Exception as e:
+                    ctx.logger.warning(f"Error indexing node: {e}")
+
+            ctx.logger.info("Scraped document indexed in Pinecone successfully")
+            return True
+
+        except Exception as e:
+            ctx.logger.error(f"Error indexing scraped document: {e}")
+            return False
+
     async def query_compliance_documents(
         self,
         ctx: Context,
         supplier_name: str,
         company_values: str,
         industry: str,
+        b_corp_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Query RAG system for supplier compliance information.
+        Query RAG system for supplier compliance information by scraping B Corp website.
 
         Process:
-        1. Select the BEST supplier that matches company values
-        2. Retrieve relevant chunks from ONLY that supplier
-        3. Use LLM (Ollama/ASI:1) to analyze compliance
-        4. Extract ethics and sustainability scores
-        5. Return structured compliance data
+        1. Scrape B Corp page for supplier (Governance, Workers, Community, Environment, Customers)
+        2. Convert scraped data to Document and create embeddings
+        3. Store embeddings in Pinecone
+        4. Query RAG system based on company values
+        5. Use LLM to analyze compliance and generate scores
+        6. Return structured compliance data
 
         Returns:
         {
@@ -408,62 +550,79 @@ class ComplianceRAGSystem:
             "retrieved_context": str
         }
         """
-        if not self.initialized or not self.query_engine:
+        if not self.initialized:
             ctx.logger.error("RAG system not initialized")
-            return self._generate_fallback_response("Unknown")
+            return self._generate_fallback_response(supplier_name)
 
         try:
-            # Step 1 & 2 COMBINED: Select supplier AND analyze compliance in ONE query
-            # For single hardcoded file, read directly instead of using RAG
-            # This bypasses the slow RAG query
-            supplier_text = ""
-            for doc in self.documents:
-                supplier_text += doc.text + "\n\n"
-
-            supplier_list = "sunrise_sustainable"  # Hardcoded for now
-
-            combined_query = compliance_prompt(company_values, industry, supplier_list)
-
-            # Use direct Ollama client instead of LlamaIndex wrapper
-            simple_query = f"{combined_query}\n\nSupplier Data:\n{supplier_text[:3000]}"  # Limit to 3000 chars
-            ctx.logger.info(f"Sending query to Ollama ({self.llm_model})...")
-            llm_response = self.ollama_client.generate(
-                model=self.llm_model, prompt=simple_query
-            )
-            response_text = llm_response["response"]
-
-            # Parse response to extract supplier name and compliance data
-            selected_supplier = None
-            for line in response_text.split("\n"):
-                if "SELECTED_SUPPLIER:" in line.upper():
-                    selected_supplier = line.split(":", 1)[-1].strip()
-                    break
-
-            if not selected_supplier:
-                # Fallback: use first supplier
-                selected_supplier = (
-                    self.documents[0]
-                    .metadata.get("file_name", "Unknown")
-                    .replace(".txt", "")
-                    if self.documents
-                    else "Unknown"
+            # Step 1: Scrape B Corp page for supplier
+            if not b_corp_url:
+                # Construct B Corp URL from supplier name
+                supplier_slug = (
+                    supplier_name.lower().replace(" ", "-").replace("_", "-")
                 )
-                ctx.logger.warning(
-                    f"Could not extract supplier, using: {selected_supplier}"
-                )
+                b_corp_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/company/{supplier_slug}"
 
-            ctx.logger.info(f"Selected supplier: {selected_supplier}")
-
-            # Step 2: Filter documents to ONLY the selected supplier
-            if not await self.filter_to_supplier(ctx, selected_supplier):
-                ctx.logger.error("Failed to filter to selected supplier")
-                return self._generate_fallback_response(selected_supplier)
-
-            # Parse the combined response (already have compliance data)
-            result = await self._parse_rag_response(
-                ctx, response_text, selected_supplier
+            ctx.logger.info(f"Step 1: Scraping B Corp data for {supplier_name}")
+            scraped_data = await self.scrape_bcorp_supplier_page(
+                ctx, supplier_name, b_corp_url
             )
-            result["selected_supplier"] = selected_supplier
+
+            if "error" in scraped_data:
+                ctx.logger.warning("Scraping failed, using fallback")
+                return self._generate_fallback_response(supplier_name)
+
+            # Step 2: Convert scraped data to LlamaIndex Document
+            ctx.logger.info("Step 2: Converting scraped data to embeddings")
+            supplier_text = f"""
+            Supplier: {scraped_data['supplier_name']}
+            Overall B Impact Score: {scraped_data.get('overall_score', 'N/A')}
+            
+            GOVERNANCE:
+            {scraped_data.get('governance', 'No data')}
+            
+            WORKERS:
+            {scraped_data.get('workers', 'No data')}
+            
+            COMMUNITY:
+            {scraped_data.get('community', 'No data')}
+            
+            ENVIRONMENT:
+            {scraped_data.get('environment', 'No data')}
+            
+            CUSTOMERS:
+            {scraped_data.get('customers', 'No data')}
+            """
+
+            # Create Document object
+            doc = Document(
+                text=supplier_text,
+                metadata={
+                    "supplier_name": supplier_name,
+                    "source": "bcorp_scrape",
+                    "url": b_corp_url,
+                },
+            )
+
+            # Step 3: Index the document in Pinecone
+            ctx.logger.info("Step 3: Storing embeddings in Pinecone")
+            await self._index_scraped_document(ctx, doc)
+
+            # Step 4: Query RAG system
+            ctx.logger.info("Step 4: Querying RAG system")
+            query = compliance_prompt(company_values, industry, supplier_name)
+
+            # Query using the indexed data
+            rag_response = self.query_engine.query(query)
+            response_text = str(rag_response)
+
+            ctx.logger.info(f"RAG Response length: {len(response_text)} characters")
+
+            # Step 5: Parse response and extract compliance data
+            ctx.logger.info("Step 5: Parsing compliance data")
+            result = await self._parse_rag_response(ctx, response_text, supplier_name)
+            result["selected_supplier"] = supplier_name
+            result["scraped_data"] = scraped_data
 
             return result
 
@@ -472,7 +631,7 @@ class ComplianceRAGSystem:
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response("Unknown")
+            return self._generate_fallback_response(supplier_name)
 
     async def _parse_rag_response(
         self, ctx: Context, response_text: str, supplier_name: str
@@ -664,6 +823,7 @@ class ComplianceRAGSystem:
         supplier_name: str,
         company_values: str,
         industry: str,
+        b_corp_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Synchronous wrapper for query_compliance_documents for use in LangGraph nodes.
@@ -720,6 +880,7 @@ class ComplianceRAGSystem:
                                 supplier_name=supplier_name,
                                 company_values=company_values,
                                 industry=industry,
+                                b_corp_url=b_corp_url,
                             )
                         )
                     finally:
@@ -737,6 +898,7 @@ class ComplianceRAGSystem:
                         supplier_name=supplier_name,
                         company_values=company_values,
                         industry=industry,
+                        b_corp_url=b_corp_url,
                     )
                 )
                 return result
@@ -751,25 +913,34 @@ def compliance_check_node(
     state: SupplierWorkflowState, rag_system: ComplianceRAGSystem, ctx: Context
 ) -> SupplierWorkflowState:
     """
-    Node 1: Run compliance check on supplier using RAG system.
+    Node 1: Run compliance check on supplier using RAG system with web scraping.
 
-    Input: supplier_name, company_values, industry
+    Process:
+    1. Scrape B Corp webpage for supplier
+    2. Convert to embeddings and store in Pinecone
+    3. Query RAG system for compliance analysis
+    4. Return compliance score and details
+
+    Input: supplier_name, company_values, industry, b_corp_profile_url (optional)
     Output: compliance_score, ethics_info, sustainability_info, violations
     """
     ctx.logger.info("=" * 70)
-    ctx.logger.info("COMPLIANCE CHECK NODE")
+    ctx.logger.info("[LangGraph Node: compliance_check] SCRAPING & ANALYZING")
     ctx.logger.info("=" * 70)
 
     try:
-        ctx.logger.info(
-            f"Checking compliance for: {state.get('supplier_name', 'Unknown')}"
-        )
+        supplier_name = state.get("supplier_name", "Unknown")
+        b_corp_url = state.get("b_corp_profile_url")
 
-        # Run RAG query for compliance
+        ctx.logger.info(f"Supplier: {supplier_name}")
+        ctx.logger.info(f"B Corp URL: {b_corp_url}")
+
+        # Run RAG query for compliance (includes scraping)
         rag_result = rag_system.query_compliance_documents_sync(
-            supplier_name=state.get("supplier_name", ""),
+            supplier_name=supplier_name,
             company_values=state.get("company_values", ""),
             industry=state.get("industry", ""),
+            b_corp_url=b_corp_url,
         )
 
         # Update state with compliance results
@@ -780,13 +951,18 @@ def compliance_check_node(
         state["rag_context"] = rag_result.get("retrieved_context", "")
         state["current_step"] = "compliance_check_complete"
 
-        ctx.logger.info(f"Compliance Score: {state['compliance_score']}/100")
-        ctx.logger.info(f"Violations: {len(state['violations'])}")
+        ctx.logger.info(f"✓ Compliance Score: {state['compliance_score']}/100")
+        ctx.logger.info(f"✓ Ethics Info: {state['ethics_info'][:100]}...")
+        ctx.logger.info(f"✓ Violations: {len(state['violations'])}")
 
         return state
 
     except Exception as e:
         ctx.logger.error(f"Error in compliance check: {e}")
+        import traceback
+
+        traceback.print_exc()
+
         state["current_step"] = "compliance_check_failed"
         state["error_message"] = f"Compliance check failed: {str(e)}"
         state["compliance_score"] = 0.0

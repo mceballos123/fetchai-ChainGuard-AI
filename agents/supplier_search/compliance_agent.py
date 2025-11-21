@@ -168,6 +168,9 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
             supplier_name=msg.supplier_name,
             supplier_location=None,
             supplier_country=None,
+            b_corp_profile_url=(
+                msg.b_corp_profile_url if msg.b_corp_profile_url else None
+            ),
             retrieved_documents=None,
             rag_context=None,
             compliance_score=None,

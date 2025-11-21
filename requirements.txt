@@ -33,6 +33,7 @@ sentry-sdk
 requests
 beautifulsoup4
 selenium
+nest-asyncio
 
 pytest
 pytest-asyncio
