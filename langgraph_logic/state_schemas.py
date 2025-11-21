@@ -38,6 +38,7 @@ class SupplierWorkflowState(TypedDict):
     supplier_name: Optional[str]
     supplier_location: Optional[str]
     supplier_country: Optional[str]
+    b_corp_profile_url: Optional[str]
 
     # RAG context from LlamaIndex + Pinecone (EPA, BBB documents)
     retrieved_documents: Optional[List[str]]

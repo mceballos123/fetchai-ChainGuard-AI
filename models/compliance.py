@@ -8,6 +8,7 @@ class ComplianceRequest(Model):
     supplier_name: str
     industry: str
     company_values: str
+    b_corp_profile_url: str = ""
     timestamp: str = ""
 
 
