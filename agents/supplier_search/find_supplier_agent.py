@@ -167,8 +167,6 @@ async def search_b_corp_directory(
                 b_corp_profile_url=f"https://www.bcorporation.net/en-us/find-a-b-corp/?query={category}",
                 description=f"B Corporation certified company specializing in {category}",
             )
-
-            ctx.logger.info(f"This is line 171 on find_supplier_agent.py. Result: {result}")
             results.append(result)
 
         return {
@@ -428,8 +426,6 @@ def select_best_supplier(
         return None
 
     best_supplier = results[0]
-
-    ctx.logger.info(f"This is line 432 on find_supplier_agent.py. Best supplier: {best_supplier}")
     ctx.logger.info(f"Selected supplier: {best_supplier.company_name}")
 
     return best_supplier
@@ -475,13 +471,8 @@ async def handle_find_supplier_request(
         }
 
         ctx.logger.info(f"Executing LangGraph workflow for category: {search_category}")
-        ctx.logger.info(f"Initial state: {initial_state}")
 
         final_state = supplier_search_graph.invoke(initial_state)
-
-        ctx.logger.info(f"Final state: {final_state}")
-        if not final_state:
-            ctx.logger.error("Final state is None")
 
         ctx.logger.info("=" * 60)
         ctx.logger.info("LangGraph Workflow Completed")

@@ -112,7 +112,6 @@ class ComplianceRAGSystem:
         driver = None
         try:
             ctx.logger.info(f"Scraping B Corp page for: {supplier_name}")
-            ctx.logger.info(f"URL: {company_url}")
 
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
@@ -147,15 +146,12 @@ class ComplianceRAGSystem:
             if score_element:
                 score_text = score_element.get_text(strip=True)
                 scraped_data["overall_score"] = score_text
-                ctx.logger.info(f"Overall Score: {score_text}")
 
             # Tab sections to scrape
             tabs = ["Governance", "Workers", "Community", "Environment", "Customers"]
 
             for tab in tabs:
                 try:
-                    ctx.logger.info(f"Scraping {tab} tab...")
-
                     # Try to find and click the tab button
                     tab_button = driver.find_element(
                         By.XPATH, f"//button[contains(text(), '{tab}')]"
@@ -170,23 +166,15 @@ class ComplianceRAGSystem:
                     content_div = tab_soup.find("div", {"role": "tabpanel"})
                     if content_div:
                         tab_content = content_div.get_text(separator=" ", strip=True)
-                        scraped_data[tab.lower()] = tab_content[
-                            :2000
-                        ]  # Limit to 2000 chars
-                        ctx.logger.info(
-                            f"Extracted {len(tab_content)} characters from {tab}"
-                        )
-                    else:
-                        ctx.logger.warning(f"Could not find content for {tab} tab")
+                        scraped_data[tab.lower()] = tab_content[:2000]
 
                 except Exception as e:
-                    ctx.logger.warning(f"Error scraping {tab} tab: {e}")
                     continue
 
             if driver:
                 driver.quit()
 
-            ctx.logger.info(f"Successfully scraped B Corp data for {supplier_name}")
+            ctx.logger.info(f"Successfully scraped data for {supplier_name}")
             return scraped_data
 
         except Exception as e:
@@ -212,13 +200,11 @@ class ComplianceRAGSystem:
         try:
             ctx.logger.info("Initializing Compliance RAG System...")
 
-            # Step 1: Initialize Pinecone (don't load local files anymore)
-            ctx.logger.info("Initializing Pinecone vector store...")
             if not await self._setup_pinecone(ctx):
                 return False
 
             self.initialized = True
-            ctx.logger.info("Compliance RAG System initialized successfully!")
+            ctx.logger.info("Compliance RAG System initialized")
             return True
 
         except Exception as e:
@@ -506,7 +492,6 @@ class ComplianceRAGSystem:
             )
 
             nodes = parser.get_nodes_from_documents([document])
-            ctx.logger.info(f"Created {len(nodes)} chunks from scraped data")
 
             # Index nodes in Pinecone
             for node in nodes:
@@ -515,11 +500,11 @@ class ComplianceRAGSystem:
                 except Exception as e:
                     ctx.logger.warning(f"Error indexing node: {e}")
 
-            ctx.logger.info("Scraped document indexed in Pinecone successfully")
+            ctx.logger.info("Document indexed in Pinecone")
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Error indexing scraped document: {e}")
+            ctx.logger.error(f"Error indexing document: {e}")
             return False
 
     async def query_compliance_documents(
@@ -574,7 +559,6 @@ class ComplianceRAGSystem:
                 return self._generate_fallback_response(supplier_name)
 
             # Step 2: Convert scraped data to LlamaIndex Document
-            ctx.logger.info("Step 2: Converting scraped data to embeddings")
             supplier_text = f"""
             Supplier: {scraped_data['supplier_name']}
             Overall B Impact Score: {scraped_data.get('overall_score', 'N/A')}
@@ -606,21 +590,16 @@ class ComplianceRAGSystem:
             )
 
             # Step 3: Index the document in Pinecone
-            ctx.logger.info("Step 3: Storing embeddings in Pinecone")
             await self._index_scraped_document(ctx, doc)
 
             # Step 4: Query RAG system
-            ctx.logger.info("Step 4: Querying RAG system")
             query = compliance_prompt(company_values, industry, supplier_name)
 
             # Query using the indexed data
             rag_response = self.query_engine.query(query)
             response_text = str(rag_response)
 
-            ctx.logger.info(f"RAG Response length: {len(response_text)} characters")
-
             # Step 5: Parse response and extract compliance data
-            ctx.logger.info("Step 5: Parsing compliance data")
             result = await self._parse_rag_response(ctx, response_text, supplier_name)
             result["selected_supplier"] = supplier_name
             result["scraped_data"] = scraped_data
@@ -933,8 +912,7 @@ def compliance_check_node(
         supplier_name = state.get("supplier_name", "Unknown")
         b_corp_url = state.get("b_corp_profile_url")
 
-        ctx.logger.info(f"Supplier: {supplier_name}")
-        ctx.logger.info(f"B Corp URL: {b_corp_url}")
+        ctx.logger.info(f"Analyzing compliance for: {supplier_name}")
 
         # Run RAG query for compliance (includes scraping)
         rag_result = rag_system.query_compliance_documents_sync(
@@ -952,9 +930,7 @@ def compliance_check_node(
         state["rag_context"] = rag_result.get("retrieved_context", "")
         state["current_step"] = "compliance_check_complete"
 
-        ctx.logger.info(f"✓ Compliance Score: {state['compliance_score']}/100")
-        ctx.logger.info(f"✓ Ethics Info: {state['ethics_info'][:100]}...")
-        ctx.logger.info(f"✓ Violations: {len(state['violations'])}")
+        ctx.logger.info(f"Compliance Score: {state['compliance_score']}/100")
 
         return state
 
