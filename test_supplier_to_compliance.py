@@ -24,10 +24,13 @@ load_dotenv()
 # Test orchestrator agent
 test_orchestrator = Agent(
     name="test_orchestrator",
-    seed="test_orchestrator_seed_12345",
-    port=8009,
-    endpoint=["http://localhost:8009/submit"],
+    seed=os.getenv("DUMMY_SUPPLIER_TO_COMPLIANCE_SEED"),
+    port=8010,
+    endpoint=["http://localhost:8010/submit"],
 )
+
+print(f"Test orchestrator address: {test_orchestrator.address}")
+print(f"Test orchestator {test_orchestrator}")
 
 # Get agent addresses from environment
 FIND_SUPPLIER_AGENT_ADDRESS = os.getenv("FIND_SUPPLIER_ADDRESS")
@@ -56,10 +59,13 @@ async def startup(ctx: Context):
 
     await asyncio.sleep(2)
 
-    # Initialize storage
-    ctx.storage.set("current_request_id", None)
+    # Initialize storage with proper defaults
+    ctx.storage.set("current_request_id", "")
     ctx.storage.set("supplier_found", False)
     ctx.storage.set("compliance_checked", False)
+    ctx.storage.set(
+        "found_supplier", {}
+    )  # Initialize as empty dict to prevent corruption
 
     # Step 1: Send request to find_supplier_agent
     test_query = "I need a coffee supplier"
@@ -78,6 +84,8 @@ async def startup(ctx: Context):
         user_query=test_query,
         business_category="general",
     )
+
+    print(f"Sending to Find Supplier Agent: {find_supplier_request}")
 
     ctx.logger.info("Sending to Find Supplier Agent...")
     await ctx.send(FIND_SUPPLIER_AGENT_ADDRESS, find_supplier_request)
@@ -102,7 +110,16 @@ async def handle_find_supplier_response(
         ctx.logger.info(f"✓ B Corp URL: {supplier.b_corp_profile_url}")
 
         ctx.storage.set("supplier_found", True)
-        ctx.storage.set("found_supplier", supplier)
+
+        # Store supplier data as a dictionary to prevent JSON corruption
+        supplier_dict = {
+            "company_name": supplier.company_name,
+            "location": supplier.location,
+            "industry": supplier.industry,
+            "b_corp_profile_url": supplier.b_corp_profile_url,
+            "description": supplier.description,
+        }
+        ctx.storage.set("found_supplier", supplier_dict)
 
         # Step 3: Send to compliance agent
         ctx.logger.info(f"\n{'=' * 80}")
@@ -163,8 +180,13 @@ async def handle_compliance_response(
     compliance_checked = ctx.storage.get("compliance_checked")
     found_supplier = ctx.storage.get("found_supplier")
 
-    if supplier_found:
-        ctx.logger.info(f"✓ Step 1: Supplier Found - {found_supplier.company_name}")
+    if supplier_found and found_supplier:
+        supplier_name = (
+            found_supplier.get("company_name", "Unknown")
+            if isinstance(found_supplier, dict)
+            else "Unknown"
+        )
+        ctx.logger.info(f"✓ Step 1: Supplier Found - {supplier_name}")
     else:
         ctx.logger.info(f"✗ Step 1: Supplier Not Found")
 

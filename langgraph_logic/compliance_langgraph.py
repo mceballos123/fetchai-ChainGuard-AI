@@ -23,6 +23,7 @@ from llama_index.core import (
 )
 from llama_index.core.node_parser import SimpleNodeParser
 from llama_index.vector_stores.pinecone import PineconeVectorStore
+
 from llama_index.embeddings.ollama import OllamaEmbedding
 from pinecone import Pinecone, ServerlessSpec
 from ollama import Client
