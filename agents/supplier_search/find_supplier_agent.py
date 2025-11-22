@@ -167,6 +167,8 @@ async def search_b_corp_directory(
                 b_corp_profile_url=f"https://www.bcorporation.net/en-us/find-a-b-corp/?query={category}",
                 description=f"B Corporation certified company specializing in {category}",
             )
+
+            ctx.logger.info(f"This is line 171 on find_supplier_agent.py. Result: {result}")
             results.append(result)
 
         return {
@@ -426,6 +428,8 @@ def select_best_supplier(
         return None
 
     best_supplier = results[0]
+
+    ctx.logger.info(f"This is line 432 on find_supplier_agent.py. Best supplier: {best_supplier}")
     ctx.logger.info(f"Selected supplier: {best_supplier.company_name}")
 
     return best_supplier
