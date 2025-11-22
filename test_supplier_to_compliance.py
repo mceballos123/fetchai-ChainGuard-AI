@@ -29,9 +29,6 @@ test_orchestrator = Agent(
     endpoint=["http://localhost:8010/submit"],
 )
 
-print(f"Test orchestrator address: {test_orchestrator.address}")
-print(f"Test orchestator {test_orchestrator}")
-
 # Get agent addresses from environment
 FIND_SUPPLIER_AGENT_ADDRESS = os.getenv("FIND_SUPPLIER_ADDRESS")
 COMPLIANCE_AGENT_ADDRESS = os.getenv("COMPLIANCE_AGENT_ADDRESS")
@@ -84,8 +81,6 @@ async def startup(ctx: Context):
         user_query=test_query,
         business_category="general",
     )
-
-    print(f"Sending to Find Supplier Agent: {find_supplier_request}")
 
     ctx.logger.info("Sending to Find Supplier Agent...")
     await ctx.send(FIND_SUPPLIER_AGENT_ADDRESS, find_supplier_request)
