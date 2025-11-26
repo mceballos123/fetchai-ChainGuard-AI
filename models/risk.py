@@ -8,6 +8,7 @@ class RiskRequest(Model):
     request_id: str 
     supplier_name: str
     industry: str
+    b_corp_profile_url: Optional[str] = None
     timestamp: str = ""
 
 class RiskResponse(Model):

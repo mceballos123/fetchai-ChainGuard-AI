@@ -97,14 +97,16 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
     Handle risk management check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info
+    1. Receive supplier info and B Corp profile URL
     2. Create workflow state from request
-    3. Run LangGraph risk management workflow with RAG:
-       - risk_check_node: RAG analysis
-       - risk_router: conditional routing (score >= 75?)
+    3. Run LangGraph risk management workflow with RAG + Web Scraping:
+       - risk_check_node: Scrape B Corp page + RAG analysis
+       - risk_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
     4. Build RiskResponse from workflow result
     5. Return response to orchestrator
+    
+    Note: Works in parallel with compliance_agent. Both must pass (>= 60) for supplier approval.
     """
     ctx.logger.info(f"Received RiskRequest for {msg.supplier_name}")
 
@@ -137,6 +139,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
             supplier_name=msg.supplier_name,
             supplier_location=None,
             supplier_country=None,
+            b_corp_profile_url=msg.b_corp_profile_url,
             retrieved_documents=None,
             rag_context=None,
             compliance_score=None,
@@ -176,8 +179,8 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        # Determine status based on score
-        current_step = "risk_approved" if risk_score >= 75 else "risk_rejected"
+        # Determine status based on score (threshold: 60)
+        current_step = "risk_approved" if risk_score >= 60 else "risk_rejected"
 
         # Update current supplier info with results
         current_supplier_info["risk_score"] = response.risk_score

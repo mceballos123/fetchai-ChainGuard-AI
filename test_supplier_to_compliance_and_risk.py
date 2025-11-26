@@ -260,13 +260,9 @@ async def check_final_results(ctx: Context):
 
     if compliance_checked:
         if compliance_passed:
-            ctx.logger.info(
-                f"✓ Step 2A: Compliance PASSED - Score: {compliance_score}/100"
-            )
+            ctx.logger.info(f"✓ Step 2A: Compliance PASSED - Score: {compliance_score}/100")
         else:
-            ctx.logger.info(
-                f"✗ Step 2A: Compliance FAILED - Score: {compliance_score}/100"
-            )
+            ctx.logger.info(f"✗ Step 2A: Compliance FAILED - Score: {compliance_score}/100")
     else:
         ctx.logger.info(f"✗ Step 2A: Compliance Not Checked")
 
