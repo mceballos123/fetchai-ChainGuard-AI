@@ -117,17 +117,19 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     Handle financial risk check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info and industry
+    1. Receive supplier info, country, and industry from find_supplier_agent
     2. Store previous state and update current state
     3. Create workflow state from request
     4. Run LangGraph financial workflow:
-       - financial_check_node: RAG analysis
-       - financial_router: conditional routing (score >= 70?)
+       - financial_check_node: Scrape Trade War Tracker for country tariff/inflation data
+       - financial_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
     5. Build FinancialResponse from workflow result
     6. Return response to orchestrator
+    
+    Note: Country information is critical - used to query Trade War Tracker for tariff/inflation data
     """
-    ctx.logger.info(f"Received FinancialRequest for {msg.supplier_name}")
+    ctx.logger.info(f"Received FinancialRequest for {msg.supplier_name} in {msg.supplier_country}")
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -141,6 +143,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     current_supplier_info = {
         "request_id": msg.request_id,
         "supplier_name": msg.supplier_name,
+        "supplier_country": msg.supplier_country,
         "industry": msg.industry,
         "timestamp": msg.timestamp,
         "sender": sender,
@@ -165,7 +168,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             product_needed="",
             supplier_name=msg.supplier_name,
             supplier_location=None,
-            supplier_country=None,
+            supplier_country=msg.supplier_country,  # Critical: Country for Trade War Tracker
             retrieved_documents=None,
             rag_context=None,
             compliance_score=None,
@@ -205,9 +208,9 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         if not is_valid:
             ctx.logger.warning(f"Response validation failed: {error_msg}")
 
-        # Determine status based on score
+        # Determine status based on score (threshold: 60)
         current_step = (
-            "financial_approved" if financial_score >= 70 else "financial_rejected"
+            "financial_approved" if financial_score >= 60 else "financial_rejected"
         )
 
         # === STATE MANAGEMENT: Add result to current state ===

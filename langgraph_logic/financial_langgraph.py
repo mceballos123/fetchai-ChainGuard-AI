@@ -1,17 +1,21 @@
-from pathlib import Path
 from typing import Dict, Any, List, Optional, Literal
 from models.financial import FinancialRequest, FinancialResponse
 from langgraph_logic.state_schemas import SupplierWorkflowState
 import os
 import json
 import re
+import time
+import requests
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
 from dotenv import load_dotenv
 from uagents import Context
 from llama_index.core import (
     VectorStoreIndex,
     Settings,
-    SimpleDirectoryReader,
     Document,
 )
 from llama_index.core.node_parser import SimpleNodeParser
@@ -25,48 +29,15 @@ from prompts.finance_prompt import finance_prompt
 
 load_dotenv()
 
-FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_FINANCIAL", "financial_files")
-
-
-def _resolve_financial_path() -> Path:
-    """
-    Resolve the financial files path with fallback options.
-    Ensures consistency across different environments and startups.
-
-    Priority:
-    1. Environment variable FILE_PATH_DOCUMENTS_FINANCIAL
-    2. Relative path from backend directory
-    3. Absolute path from current working directory
-    """
-    # Option 1: Use environment variable if set
-    if FILE_PATH and FILE_PATH != "None":
-        resolved = Path(FILE_PATH)
-        if resolved.exists():
-            return resolved
-
-    # Option 2: Try relative path from root directory
-    relative_path = Path(__file__).parent.parent / "financial_files"
-    if relative_path.exists():
-        return relative_path
-
-    # Option 3: Try from current working directory
-    cwd_path = Path.cwd() / "financial_files"
-    if cwd_path.exists():
-        return cwd_path
-
-    # Fallback: Return the most likely path (will error appropriately in _load_financial_files)
-    return relative_path
-
-
-FINANCIAL_FILES_DIR = _resolve_financial_path()
 PINECONE_INDEX_NAME_FINANCIAL = os.getenv(
     "PINECONE_INDEX_NAME_FINANCIAL", "financial-risk-index"
 )
-EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION", 768)
+EMBEDDING_DIMENSION = 768
+TRADE_WAR_TRACKER_URL = "https://www.tradewartracker.com/"
 
 
 class FinancialRAGSystem:
-    """RAG system for financial document retrieval and risk analysis using local files"""
+    """RAG system for financial risk analysis using Trade War Tracker tariff/inflation data"""
 
     def __init__(self):
         self.initialized = False
@@ -84,143 +55,122 @@ class FinancialRAGSystem:
         # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
         Settings.embed_model = self.embed_model
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
+        
+        print(f"Setting up Financial RAG System: {Settings.llm}")
         self.documents = []
+        self.scraped_tariff_data = {}
+
+    async def scrape_trade_war_tracker(
+        self, ctx: Context, country: str
+    ) -> Dict[str, str]:
+        """
+        Scrape Trade War Tracker for tariff and inflation data for a specific country.
+        
+        Args:
+            country: Country name to search for tariff/inflation data
+            
+        Returns:
+            Dictionary with scraped tariff and inflation data
+        """
+        driver = None
+        try:
+            ctx.logger.info(f"Scraping Trade War Tracker for country: {country}")
+
+            chrome_options = Options()
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
+            chrome_options.add_argument(
+                "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            )
+
+            driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(30)
+            driver.get(TRADE_WAR_TRACKER_URL)
+            time.sleep(5)
+
+            scraped_data = {
+                "country": country,
+                "url": TRADE_WAR_TRACKER_URL,
+                "tariff_info": "",
+                "timeline_events": "",
+                "trade_data": "",
+                "full_content": "",
+            }
+
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+
+            # Extract main content
+            main_content = soup.get_text(separator=" ", strip=True)
+            scraped_data["full_content"] = main_content[:5000]  # Limit to 5000 chars
+
+            # Extract timeline events (country-specific mentions)
+            timeline_section = soup.find_all("li")
+            country_mentions = []
+            for item in timeline_section:
+                text = item.get_text(strip=True)
+                if country.lower() in text.lower():
+                    country_mentions.append(text[:500])
+            
+            if country_mentions:
+                scraped_data["timeline_events"] = " ".join(country_mentions[:5])
+
+            # Extract tariff information from tables if available
+            tables = soup.find_all("table")
+            if tables:
+                table_text = []
+                for table in tables[:2]:  # Limit to first 2 tables
+                    table_text.append(table.get_text(separator=" ", strip=True)[:1000])
+                scraped_data["trade_data"] = " ".join(table_text)
+
+            # Search for country-specific tariff mentions in the main content
+            country_lower = country.lower()
+            paragraphs = soup.find_all("p")
+            tariff_paragraphs = []
+            for p in paragraphs:
+                p_text = p.get_text(strip=True)
+                if country_lower in p_text.lower() and ("tariff" in p_text.lower() or "trade" in p_text.lower()):
+                    tariff_paragraphs.append(p_text[:300])
+            
+            if tariff_paragraphs:
+                scraped_data["tariff_info"] = " ".join(tariff_paragraphs[:3])
+
+            if driver:
+                driver.quit()
+
+            ctx.logger.info(f"Successfully scraped tariff data for {country}")
+            return scraped_data
+
+        except Exception as e:
+            ctx.logger.error(f"Error scraping Trade War Tracker: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+            if driver:
+                try:
+                    driver.quit()
+                except:
+                    pass
+
+            return {
+                "country": country,
+                "url": TRADE_WAR_TRACKER_URL,
+                "error": str(e),
+            }
 
     async def initialize(self, ctx: Context) -> bool:
-
         try:
-            ctx.logger.info("Initializing Financial RAG System...")
-
-            # Step 1: Load financial files
-            ctx.logger.info(f"Loading financial files from {FINANCIAL_FILES_DIR}")
-            if not await self._load_financial_files(ctx):
-                return False
-
-            # Step 2: Initialize Pinecone
-            ctx.logger.info("Initializing Pinecone vector store for financial data...")
             if not await self._setup_pinecone(ctx):
                 return False
 
-            # Step 3: Index documents in Pinecone
-            ctx.logger.info("Indexing financial documents...")
-            if not await self._index_documents(ctx):
-                return False
-
             self.initialized = True
-            ctx.logger.info("Financial RAG System initialized successfully!")
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Failed to initialize Financial RAG system: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def _load_financial_files(self, ctx: Context) -> bool:
-        """Load only sunrise_sustainable_financial file"""
-        try:
-            # Load only the sunrise_sustainable_financial file
-            file_path = FINANCIAL_FILES_DIR / "sunrise_sustainable_financial.txt"
-
-            if not file_path.exists():
-                ctx.logger.error(f"Financial file not found: {file_path}")
-                return False
-
-            ctx.logger.info(f"Loading financial file: {file_path.name}")
-
-            # Use LlamaIndex to load the single document
-            reader = SimpleDirectoryReader(
-                str(FINANCIAL_FILES_DIR), required_exts=[".txt"]
-            )
-            all_documents = reader.load_data()
-
-            # Filter to only sunrise_sustainable_financial
-            self.documents = [
-                doc
-                for doc in all_documents
-                if "sunrise_sustainable" in doc.metadata.get("file_name", "").lower()
-            ]
-
-            if not self.documents:
-                ctx.logger.error("Could not load sunrise_sustainable_financial file")
-                return False
-
-            ctx.logger.info(
-                f"Successfully loaded financial document for sunrise_sustainable"
-            )
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error loading financial files: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def filter_to_supplier(self, ctx: Context, supplier_name: str) -> bool:
-        """
-        Filter documents to include only the selected supplier.
-        This ensures RAG only retrieves financial data about the chosen supplier.
-        Handles name matching between supplier input and file names.
-        """
-        try:
-            ctx.logger.info(
-                f"Filtering financial documents to supplier: {supplier_name}"
-            )
-            ctx.logger.info(f"Available files:")
-
-            # Log all available documents with their names
-            for doc in self.documents:
-                doc_name = doc.metadata.get("file_name", "Unknown")
-                ctx.logger.info(f"   - File: {doc_name}")
-
-            # Normalize supplier name for matching
-            normalized_supplier = supplier_name.lower().replace("_", " ").strip()
-            ctx.logger.info(f"Normalized search term: '{normalized_supplier}'")
-
-            # Find matching document using multiple strategies
-            filtered_docs = []
-            for doc in self.documents:
-                doc_file_name = (
-                    doc.metadata.get("file_name", "")
-                    .lower()
-                    .replace(".txt", "")
-                    .replace("_financial", "")
-                )
-
-                # Multiple matching strategies
-                if (
-                    normalized_supplier == doc_file_name.replace("_", " ")
-                    or normalized_supplier in doc_file_name.replace("_", " ")
-                    or doc_file_name.replace("_", " ") in normalized_supplier
-                    or any(
-                        word in doc_file_name for word in normalized_supplier.split()
-                    )
-                ):
-                    filtered_docs.append(doc)
-
-            if not filtered_docs:
-                ctx.logger.error(
-                    f"No financial documents found for supplier: '{supplier_name}'"
-                )
-                ctx.logger.error(f"  Searched for: '{normalized_supplier}'")
-                ctx.logger.error(f"  Available files:")
-                for doc in self.documents:
-                    ctx.logger.error(
-                        f"    - {doc.metadata.get('file_name', 'Unknown')}"
-                    )
-                return False
-
-            # Re-index with only the selected supplier
-            self.documents = filtered_docs
-            ctx.logger.info(
-                f"Filtered to {len(filtered_docs)} financial document(s) for: {supplier_name}"
-            )
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error filtering financial documents: {e}")
+            ctx.logger.error(f"Failed to initialize RAG system: {e}")
             import traceback
 
             traceback.print_exc()
@@ -264,98 +214,62 @@ class FinancialRAGSystem:
             # Create index from vector store
             self.index = VectorStoreIndex.from_vector_store(vector_store)
 
-            # Create query engine with compact mode (faster than tree_summarize)
+            # Create query engine
             self.query_engine = self.index.as_query_engine(
                 similarity_top_k=1, response_mode="compact", verbose=True
             )
 
-            ctx.logger.info("Pinecone vector store initialized for financial data")
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Error setting up Pinecone for financial data: {e}")
+            ctx.logger.error(f"Error setting up Pinecone: {e}")
             return False
 
-    async def _index_documents(self, ctx: Context) -> bool:
-        """Index financial documents in Pinecone (only if not already indexed)"""
+    async def _index_scraped_document(self, ctx: Context, document: Document) -> bool:
+        """Index a single scraped document in Pinecone"""
         try:
             if not self.index:
-                ctx.logger.warning(
-                    "Index not initialized, skipping financial document indexing"
-                )
+                ctx.logger.error("Index not initialized")
                 return False
 
-            # Check if documents are already indexed in Pinecone
-            try:
-                # Get the Pinecone index stats to check if it has vectors
-                from pinecone import Pinecone
-
-                pinecone_api_key = os.getenv("PINECONE_API_KEY")
-                pc = Pinecone(api_key=pinecone_api_key)
-                pinecone_index = pc.Index(PINECONE_INDEX_NAME_FINANCIAL)
-                stats = pinecone_index.describe_index_stats()
-
-                total_vectors = stats.get("total_vector_count", 0)
-
-                if total_vectors > 0:
-                    ctx.logger.info(
-                        f"Pinecone financial index already contains {total_vectors} vectors"
-                    )
-                    ctx.logger.info(
-                        "Skipping document indexing (financial documents already in vector DB)"
-                    )
-                    return True
-                else:
-                    ctx.logger.info(
-                        "Pinecone financial index is empty, proceeding with document indexing..."
-                    )
-            except Exception as e:
-                ctx.logger.warning(
-                    f"Could not check financial index stats: {e}, proceeding with indexing..."
-                )
-
-            # Parse documents into nodes (chunks)
+            # Parse document into nodes (chunks)
             parser = SimpleNodeParser.from_defaults(
                 chunk_size=512,
-                chunk_overlap=20,  # Chunks of 512 tokens with 20 token overlap
+                chunk_overlap=20,
             )
 
-            nodes = []
-            for doc in self.documents:
-                doc_nodes = parser.get_nodes_from_documents([doc])
-                nodes.extend(doc_nodes)
-
-            ctx.logger.info(f"Created {len(nodes)} financial document chunks")
+            nodes = parser.get_nodes_from_documents([document])
 
             # Index nodes in Pinecone
             for node in nodes:
                 try:
                     self.index.insert_nodes([node])
                 except Exception as e:
-                    ctx.logger.warning(f"Error indexing financial node: {e}")
+                    ctx.logger.warning(f"Error indexing node: {e}")
 
-            ctx.logger.info("Financial documents indexed in Pinecone")
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Error indexing financial documents: {e}")
+            ctx.logger.error(f"Error indexing document: {e}")
             return False
 
     async def query_financial_documents(
         self,
         ctx: Context,
         supplier_name: str,
+        country: str,
         industry: str,
     ) -> Dict[str, Any]:
         """
-        Query RAG system for supplier financial risk information.
+        Query RAG system for country tariff/inflation information using Trade War Tracker.
 
         Process:
-        1. Filter to the specified supplier's financial documents
-        2. Retrieve relevant chunks from ONLY that supplier
-        3. Use LLM (Ollama) to analyze financial risks
-        4. Extract tariffs, inflation, and other financial risk factors
-        5. Return structured financial data
+        1. Scrape Trade War Tracker for country tariff/inflation data
+        2. Convert scraped data to Document and create embeddings
+        3. Store embeddings in Pinecone
+        4. Query RAG system for financial risk analysis
+        5. Use LLM to analyze tariffs and inflation impact
+        6. Return structured financial data
 
         Returns:
         {
@@ -365,76 +279,86 @@ class FinancialRAGSystem:
             "retrieved_context": str
         }
         """
-        if not self.initialized or not self.query_engine:
-            ctx.logger.error("Financial RAG system not initialized")
-            return self._generate_fallback_response(supplier_name)
+        if not self.initialized:
+            ctx.logger.error("RAG system not initialized")
+            return self._generate_fallback_response(supplier_name, country)
 
         try:
-            # Step 1: Filter documents to ONLY the selected supplier
-            ctx.logger.info("=" * 60)
-            ctx.logger.info("FINANCIAL DOCUMENT FILTERING PHASE")
-            ctx.logger.info("=" * 60)
+            # Step 1: Scrape Trade War Tracker for country data
+            if not country:
+                ctx.logger.error("No country provided for tariff analysis")
+                return self._generate_fallback_response(supplier_name, country)
 
-            if not await self.filter_to_supplier(ctx, supplier_name):
-                ctx.logger.error(
-                    "Failed to filter to selected supplier for financial analysis"
-                )
-                return self._generate_fallback_response(supplier_name)
+            scraped_data = await self.scrape_trade_war_tracker(ctx, country)
 
-            # Step 2: Financial risk analysis on the selected supplier ONLY
-            ctx.logger.info("\n" + "=" * 60)
-            ctx.logger.info("FINANCIAL RISK ANALYSIS PHASE")
-            ctx.logger.info("=" * 60)
+            if "error" in scraped_data:
+                ctx.logger.warning("Scraping failed, using fallback")
+                return self._generate_fallback_response(supplier_name, country)
 
-            # Build financial analysis query
-            financial_query = finance_prompt(supplier_name, industry)
+            # Step 2: Convert scraped data to LlamaIndex Document
+            tariff_text = f"""
+            Supplier: {supplier_name}
+            Operating Country: {country}
+            Industry: {industry}
+            
+            TARIFF INFORMATION:
+            {scraped_data.get('tariff_info', 'No specific tariff data')}
+            
+            TIMELINE EVENTS:
+            {scraped_data.get('timeline_events', 'No timeline events')}
+            
+            TRADE DATA:
+            {scraped_data.get('trade_data', 'No trade data')}
+            
+            FULL CONTEXT:
+            {scraped_data.get('full_content', 'No additional context')[:3000]}
+            """
 
-            ctx.logger.info(
-                f"Analyzing financial risks for {supplier_name} (LLM: {self.llm_type})"
+            # Create Document object
+            doc = Document(
+                text=tariff_text,
+                metadata={
+                    "supplier_name": supplier_name,
+                    "country": country,
+                    "source": "trade_war_tracker",
+                    "url": TRADE_WAR_TRACKER_URL,
+                },
             )
 
-            # For single hardcoded file, read directly instead of using RAG
-            # This bypasses the slow RAG query and tree_summarize process
-            supplier_text = ""
-            for doc in self.documents:
-                supplier_text += doc.text + "\n\n"
+            # Step 3: Index the document in Pinecone
+            await self._index_scraped_document(ctx, doc)
 
-            # Use direct Ollama client instead of LlamaIndex wrapper
-            simple_query = f"{financial_query}\n\nSupplier Data:\n{supplier_text[:2000]}"  # Limit to 2000 chars
-            ctx.logger.info(f"Sending query to Ollama ({self.llm_model})...")
-            llm_response = self.ollama_client.generate(
-                model=self.llm_model, prompt=simple_query
-            )
-            response_text = llm_response["response"]
+            # Step 4: Query RAG system
+            query = finance_prompt(supplier_name, industry, country)
 
-            # Parse the response
-            result = await self._parse_rag_response(ctx, response_text, supplier_name)
+            # Query using the indexed data
+            rag_response = self.query_engine.query(query)
+            response_text = str(rag_response)
 
-            ctx.logger.info(f"Financial risk analysis complete!")
-            ctx.logger.info(f"   Supplier: {supplier_name}")
-            ctx.logger.info(f"   Financial Score: {result['financial_score']}/100")
+            # Step 5: Parse response and extract financial data
+            result = await self._parse_rag_response(ctx, response_text, supplier_name, country)
+            result["scraped_data"] = scraped_data
 
             return result
 
         except Exception as e:
-            ctx.logger.error(f"Financial query failed: {e}")
+            ctx.logger.error(f"Query failed: {e}")
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name)
+            return self._generate_fallback_response(supplier_name, country)
 
     async def _parse_rag_response(
-        self, ctx: Context, response_text: str, supplier_name: str
+        self, ctx: Context, response_text: str, supplier_name: str, country: str
     ) -> Dict[str, Any]:
         """Parse LLM response and extract structured financial data"""
         try:
-
             # Initialize defaults
             financial_score = 50.0
             financial_details = "Insufficient financial data"
             risk_factors = []
 
-            # Parse response (handle various formats)
+            # Parse response
             lines = response_text.split("\n")
 
             for i, line in enumerate(lines):
@@ -451,102 +375,73 @@ class FinancialRAGSystem:
                     # Extract content after "financial_details:"
                     content = line.split(":", 1)[-1].strip()
 
-                    # If this line is empty or minimal, try to get content from next lines
+                    # If this line is minimal, look ahead for more content
                     if not content or len(content) < 30:
-                        # Look ahead for more content (up to 10 lines max)
-                        collected_lines = [content] if content else []
-                        line_count = 0
-
                         for next_line in lines[i + 1 :]:
-                            line_count += 1
-                            if line_count > 10:  # Prevent infinite collection
-                                break
-
                             next_line_lower = next_line.lower()
-                            next_line_stripped = next_line.strip()
-
                             # Stop if we hit another field marker
-                            if ":" in next_line_lower and any(
+                            if ":" in next_line and any(
                                 field in next_line_lower
-                                for field in [
-                                    "risk_factors:",
-                                    "financial_score:",
-                                ]
+                                for field in ["risk_factors", "financial_score"]
                             ):
                                 break
-
-                            # Add non-empty lines with proper spacing
-                            if next_line_stripped:
-                                if collected_lines and not collected_lines[-1].endswith(
-                                    " "
-                                ):
-                                    collected_lines.append(" ")
-                                collected_lines.append(next_line_stripped)
+                            if next_line.strip():
+                                content += " " + next_line.strip()
                             else:
-                                # Empty line indicates end of section
                                 break
 
-                        # Join with proper spacing
-                        content = "".join(collected_lines)
+                    # Fix concatenation issues
+                    content = re.sub(r"(\w)([A-Z][a-z])", r"\1 \2", content)
+                    content = re.sub(r"\s+", " ", content).strip()
 
                     if content:
-                        # Clean up any accidental text concatenation issues
-                        # Fix cases like "beansfrC" -> "beans from"
-                        content = re.sub(r"(\w)([A-Z][a-z])", r"\1 \2", content)
-                        # Ensure proper spacing around common words
-                        content = re.sub(r"\s+", " ", content).strip()
-
                         financial_details = content
 
                 elif "risk_factors:" in line_lower:
-                    risk_str = line.split(":", 1)[-1].strip().lower()
-                    if risk_str != "minimal risks" and risk_str and risk_str != "none":
-                        risk_factors = [r.strip() for r in risk_str.split(",")]
+                    factors_str = line.split(":", 1)[-1].strip().lower()
+                    if (
+                        factors_str
+                        and "minimal" not in factors_str
+                        and "none" not in factors_str
+                    ):
+                        risk_factors = [f.strip() for f in factors_str.split(",")]
 
             return {
                 "financial_score": float(financial_score),
-                "financial_details": financial_details
-                or "No financial details available",
+                "financial_details": financial_details or "No financial information available",
                 "risk_factors": risk_factors,
                 "retrieved_context": response_text,
             }
 
         except Exception as e:
-            ctx.logger.error(f"Error parsing financial RAG response: {e}")
+            ctx.logger.error(f"Error parsing RAG response: {e}")
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name)
+            return self._generate_fallback_response(supplier_name, country)
 
-    def _generate_fallback_response(self, supplier_name: str) -> Dict[str, Any]:
+    def _generate_fallback_response(self, supplier_name: str, country: str = "Unknown") -> Dict[str, Any]:
         """Generate fallback response when RAG is unavailable"""
         return {
             "financial_score": 50.0,  # Neutral score
-            "financial_details": f"Unable to retrieve detailed financial information for {supplier_name}",
+            "financial_details": f"Unable to retrieve tariff/inflation information for {country}",
             "risk_factors": ["Data retrieval unavailable"],
-            "retrieved_context": "Fallback mode - Financial RAG system unavailable",
+            "retrieved_context": "Fallback mode - RAG system unavailable",
         }
 
     def query_financial_documents_sync(
         self,
         supplier_name: str,
+        country: str,
         industry: str,
     ) -> Dict[str, Any]:
-        """
-        Synchronous wrapper for query_financial_documents for use in LangGraph nodes.
-
-        This method should only be called from synchronous contexts.
-        For async contexts, use query_financial_documents() instead.
-        """
+        """Synchronous wrapper for query_financial_documents for use in LangGraph nodes"""
         import asyncio
 
         # Create a mock context for sync execution
         class MockContext:
             def __init__(self):
                 self.logs = []
-
-            def logger_info(self, msg):
-                self.logs.append(msg)
 
             class Logger:
                 def __init__(self, parent):
@@ -567,15 +462,11 @@ class FinancialRAGSystem:
 
         try:
             mock_ctx = MockContext()
-            # Use asyncio.run() to create a new event loop properly
-            # This handles the case where an event loop is already running
             try:
-                # Try to get current running loop (will raise if no loop)
+                # Try to get current running loop
                 loop = asyncio.get_running_loop()
-                # If we're here, a loop is running, we need to use a different approach
-                # Create a new thread with its own event loop
+                # If we're here, a loop is running, use a different approach
                 import concurrent.futures
-                import threading
 
                 def run_async():
                     new_loop = asyncio.new_event_loop()
@@ -585,6 +476,7 @@ class FinancialRAGSystem:
                             self.query_financial_documents(
                                 ctx=mock_ctx,
                                 supplier_name=supplier_name,
+                                country=country,
                                 industry=industry,
                             )
                         )
@@ -593,7 +485,7 @@ class FinancialRAGSystem:
 
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(run_async)
-                    result = future.result(timeout=1200)  # 20 minute timeout
+                    result = future.result(timeout=600)  # 10 minute timeout
                     return result
             except RuntimeError:
                 # No event loop running, use asyncio.run()
@@ -601,6 +493,7 @@ class FinancialRAGSystem:
                     self.query_financial_documents(
                         ctx=mock_ctx,
                         supplier_name=supplier_name,
+                        country=country,
                         industry=industry,
                     )
                 )
@@ -609,29 +502,39 @@ class FinancialRAGSystem:
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name)
+            return self._generate_fallback_response(supplier_name, country)
 
 
 def financial_check_node(
     state: SupplierWorkflowState, rag_system: FinancialRAGSystem, ctx: Context
 ) -> SupplierWorkflowState:
     """
-    Node 1: Run financial risk check on supplier using RAG system.
+    Node 1: Run financial risk check on country using Trade War Tracker.
 
-    Input: supplier_name (pre-selected by Compliance Agent), industry
-    Output: financial_score, financial_details, risk_factors
+    Process:
+    1. Get supplier country from state
+    2. Scrape Trade War Tracker for tariff/inflation data
+    3. Store in Pinecone and analyze with RAG
+    4. Return financial score and details
+
+    Input: supplier_name, supplier_country, industry
+    Output: financial_score, financial_info, risk_factors
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("Financial Risk Check Node")
-    ctx.logger.info("=" * 70)
-
     try:
-        supplier_name = state.get("supplier_name", "")
-        ctx.logger.info(f"Analyzing financial risks for: {supplier_name}")
+        supplier_name = state.get("supplier_name", "Unknown")
+        supplier_country = state.get("supplier_country", "")
+        
+        if not supplier_country:
+            ctx.logger.error("No supplier country provided for tariff analysis")
+            state["current_step"] = "financial_check_failed"
+            state["error_message"] = "No country information available"
+            state["financial_score"] = 0.0
+            return state
 
-        # Run RAG query for financial analysis on the provided supplier
+        # Run RAG query for financial analysis (includes scraping Trade War Tracker)
         rag_result = rag_system.query_financial_documents_sync(
             supplier_name=supplier_name,
+            country=supplier_country,
             industry=state.get("industry", ""),
         )
 
@@ -640,13 +543,13 @@ def financial_check_node(
         state["financial_info"] = rag_result.get("financial_details", "N/A")
         state["current_step"] = "financial_check_complete"
 
-        ctx.logger.info(f"Financial Score: {state['financial_score']}/100")
-        ctx.logger.info(f"Risk Factors: {len(rag_result.get('risk_factors', []))}")
-
         return state
 
     except Exception as e:
         ctx.logger.error(f"Error in financial check: {e}")
+        import traceback
+        traceback.print_exc()
+
         state["current_step"] = "financial_check_failed"
         state["error_message"] = f"Financial check failed: {str(e)}"
         state["financial_score"] = 0.0
@@ -682,43 +585,18 @@ def financial_router(
 
 def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
     """
-    Node 3a: Success path - Supplier meets financial requirements.
-
-    Prepares data to send to orchestrator agent.
+    Node 3a: Success path - Country meets financial requirements.
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("Success Node - Financial Risk Approved")
-    ctx.logger.info("=" * 70)
-
     state["current_step"] = "financial_approved"
     state["should_continue"] = False
-
-    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
-    ctx.logger.info(f"Financial Score: {state['financial_score']}/100")
-    ctx.logger.info(f"Status: APPROVED - Low financial risk")
-    ctx.logger.info("=" * 70)
 
     return state
 
 
 def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
     """
-    Node 3b: Error path - Supplier does not meet financial requirements.
-
-    Prepares error response.
+    Node 3b: Error path - Country does not meet requirements.
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("Error Node - Financial Risk Rejected")
-    ctx.logger.info("=" * 70)
-
-    financial_score = state.get("financial_score", 0.0)
-    error_msg = state.get("error_message", "Unknown error")
-
-    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
-    ctx.logger.info(f"Financial Score: {financial_score}/100")
-    ctx.logger.info(f"Error: {error_msg}")
-    ctx.logger.info("=" * 70)
-
     state["current_step"] = "financial_rejected"
     state["should_continue"] = False
 
@@ -739,17 +617,15 @@ def build_financial_workflow(
     Flow:
     START
         ↓
-    financial_check_node (Run RAG analysis)
+    financial_check_node (Scrape Trade War Tracker + Run RAG analysis)
         ↓
-    financial_router (Check score >= 70)
-        ├─→ success_node (Score >= 70) → END
-        └─→ error_node (Score < 70 or error) → END
+    financial_router (Check score >= 60)
+        ├─→ success_node (Score >= 60) → END
+        └─→ error_node (Score < 60 or error) → END
 
     Returns:
         Compiled StateGraph workflow
     """
-    ctx.logger.info("Building Financial LangGraph Workflow...")
-
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
 
@@ -775,7 +651,5 @@ def build_financial_workflow(
 
     # Compile workflow
     compiled_workflow = workflow.compile()
-
-    ctx.logger.info("Financial workflow built successfully")
 
     return compiled_workflow
