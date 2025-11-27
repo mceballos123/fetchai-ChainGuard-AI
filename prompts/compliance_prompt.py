@@ -1,5 +1,9 @@
 def compliance_prompt(company_values, industry, supplier_list):
     return f"""
+
+            The data that is presented to you is scraped from the B corp page website do not use any other data besides what's shown there
+            and do not make up any data. The goal is to get a good assemnet based on what provided to you. If there is not enough data make 
+            what you can from the data available to you. Just because there isn't enough data doesn't mean you can't make a good assessment.
             YOU TASK IS TO:
             SELECT THE BEST SUPPLIER AND ANALYZE COMPLIANCE - Single Query
 

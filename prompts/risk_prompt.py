@@ -14,7 +14,9 @@ def risk_prompt(supplier_name, industry):
             - Capacity constraints
             - Natural disaster exposure (location vulnerabilities including weather event that could impact the supplier)
             - Logistics and accessibility (transportation, infrastructure)
-            
+            The data is scraped from the B Corp page website do not use any other data besides what's shown there get what you can from there
+            if there is not enough data relating to other risk factors make what you can from the data available to you but just because it's small does not mean
+            you can't make a good assessment. The goal is to get a good assessment of the risk and not just a yes or no.
             Provide a balanced assessment:
             1. Risk score (0-100)
             2. Risk summary (2-3 sentences): highlight both strengths and concerns

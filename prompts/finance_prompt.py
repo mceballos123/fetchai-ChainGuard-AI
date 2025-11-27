@@ -1,28 +1,30 @@
-def finance_prompt(supplier_name, industry):
+def finance_prompt(supplier_name, industry, country):
     return f"""
-            YOU TASK IS TO:
-            Analyze the financial risk of the supplier {supplier_name} in the industry {industry} and score it from 0-100:
-            - 75 to 100 minimal risks
-            - 60 to 74 moderate risk
-            - 40 to 59 significant risk
-            - Anything below is 40 is high risk
+            YOUR TASK IS TO:
+            Analyze the financial risk for supplier {supplier_name} operating in {country} within the {industry} industry.
+            Score from 0-100 based on tariffs and inflation data from Trade War Tracker:
             
-            What to evaluate:
-            - Tariffs/import costs
-            - Inflation trends
-            - Currency exchange risks
-            - Economic stability
-            - Trade restrictions
-            - Cost predictability
-            - Relationship with the United States
+            - 75 to 100: minimal financial risks (low tariffs, stable inflation)
+            - 60 to 74: moderate risk (some tariffs, manageable inflation)
+            - 40 to 59: significant risk (high tariffs or inflation concerns)
+            - Below 40: high risk (severe tariffs, economic instability)
+            
+            What to evaluate based on the Trade War Tracker data:
+            - Current tariff rates affecting {country}
+            - Trade war timeline events involving {country}
+            - Tariff increases or decreases
+            - Inflation trends in {country}
+            - Trade restrictions or exemptions
+            - Currency and economic stability
+            - Impact on supply chain costs
             
             Provide:
-            1. Score (0-100)
-            2. Brief summary (2-3 sentences): operating costs, tariffs, inflation, currency risks
-            3. Risk factors list or "minimal risks", if supplier has little risks still include it in the list
+            1. Score (0-100) - based on tariff severity and inflation impact
+            2. Brief summary (2-3 sentences): describe specific tariffs, inflation concerns, and cost implications for {country}
+            3. Risk factors list - specific tariff percentages, trade restrictions, or "minimal risks"
             
             Response format:
             FINANCIAL_SCORE: [number]
-            FINANCIAL_DETAILS: [summary]
-            RISK_FACTORS: [list or "minimal risks"], if the supplier has little risks still include it in the list           
+            FINANCIAL_DETAILS: [summary focusing on tariffs and inflation in {country}]
+            RISK_FACTORS: [specific tariff rates, trade restrictions, or "minimal risks"]
             """

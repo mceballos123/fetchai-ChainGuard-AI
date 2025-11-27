@@ -52,6 +52,8 @@ class RiskRAGSystem:
         # Configure Settings for LlamaIndex (embeddings only)
         Settings.embed_model = self.embed_model
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
+
+        print(f"Setting up Risk RAG System: {Settings.llm}")
         self.documents = []
         self.scraped_supplier_data = {}
 
