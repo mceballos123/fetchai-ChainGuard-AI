@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Dict, Any, List, Optional, Literal
 from models.compliance import ComplianceRequest, ComplianceResponse
 from langgraph_logic.state_schemas import SupplierWorkflowState
@@ -18,7 +17,6 @@ from uagents import Context
 from llama_index.core import (
     VectorStoreIndex,
     Settings,
-    SimpleDirectoryReader,
     Document,
 )
 from llama_index.core.node_parser import SimpleNodeParser
@@ -34,40 +32,6 @@ from prompts.compliance_prompt import compliance_prompt
 
 load_dotenv()
 
-FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_COMPLIANCE")
-
-
-def _resolve_compliance_path() -> Path:
-    """
-    Resolve the compliance files path with fallback options.
-    Ensures consistency across different environments and startups.
-
-    Priority:
-    1. Environment variable FILE_PATH_DOCUMENTS_COMPLIANCE
-    2. Relative path from backend directory
-    3. Absolute path from current working directory
-    """
-    # Option 1: Use environment variable if set
-    if FILE_PATH and FILE_PATH != "None":
-        resolved = Path(FILE_PATH)
-        if resolved.exists():
-            return resolved
-
-    # Option 2: Try relative path from root directory
-    relative_path = Path(__file__).parent.parent / "compliance_files"
-    if relative_path.exists():
-        return relative_path
-
-    # Option 3: Try from current working directory
-    cwd_path = Path.cwd() / "compliance_files"
-    if cwd_path.exists():
-        return cwd_path
-
-    # Fallback: Return the most likely path (will error appropriately in _load_compliance_files)
-    return relative_path
-
-
-COMPLIANCE_FILES_DIR = _resolve_compliance_path()
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")  # gets the pinecone index name
 EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
 
@@ -209,163 +173,6 @@ class ComplianceRAGSystem:
 
         except Exception as e:
             ctx.logger.error(f"Failed to initialize RAG system: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def _load_compliance_files(self, ctx: Context) -> bool:
-        """Load only sunrise_sustainable compliance file"""
-        try:
-            # Load only the sunrise_sustainable file
-            file_path = COMPLIANCE_FILES_DIR / "sunrise_sustainable.txt"
-
-            if not file_path.exists():
-                ctx.logger.error(f"Compliance file not found: {file_path}")
-                return False
-
-            ctx.logger.info(f"Loading compliance file: {file_path.name}")
-
-            # Use LlamaIndex to load the single document
-            reader = SimpleDirectoryReader(
-                str(COMPLIANCE_FILES_DIR), required_exts=[".txt"]
-            )
-            all_documents = reader.load_data()
-
-            # Filter to only sunrise_sustainable
-            self.documents = [
-                doc
-                for doc in all_documents
-                if "sunrise_sustainable" in doc.metadata.get("file_name", "").lower()
-            ]
-
-            if not self.documents:
-                ctx.logger.error("Could not load sunrise_sustainable compliance file")
-                return False
-
-            ctx.logger.info(
-                f"Successfully loaded compliance document for sunrise_sustainable"
-            )
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error loading compliance files: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def select_best_supplier(
-        self, ctx: Context, company_values: str, industry: str
-    ) -> Optional[str]:
-        """
-        Select the BEST matching supplier from all loaded documents.
-
-        Returns: Supplier name that best aligns with company values
-        """
-        if not self.documents:
-            ctx.logger.error("No suppliers loaded")
-            return None
-
-        try:
-            # Create a mapping of file names to help with matching
-            supplier_files = {}
-            for doc in self.documents:
-                file_name = doc.metadata.get("file_name", "Unknown")
-                normalized = file_name.lower().replace(".txt", "")
-                supplier_files[normalized] = file_name
-
-            # Build selection query for LLM
-            supplier_list = "\n".join(
-                [
-                    f"- {doc.metadata.get('file_name', 'Unknown').replace('.txt', '')}"
-                    for doc in self.documents
-                ]
-            )
-
-            selection_query = f"""
-            SUPPLIER SELECTION
-            Company Values: {company_values}
-            Industry: {industry}
-            
-            Available suppliers:
-            {supplier_list}
-            
-            Select the ONE best supplier matching company values and industry.
-            Respond with ONLY the exact supplier name from the list.
-            """
-
-            response = self.query_engine.query(selection_query)
-            selected_supplier = str(response).strip()
-
-            # Normalize the response for better matching
-            normalized_response = selected_supplier.lower().replace("_", " ").strip()
-
-            return selected_supplier
-
-        except Exception as e:
-            ctx.logger.error(f"Error selecting supplier: {e}")
-            import traceback
-
-            traceback.print_exc()
-
-            # Fallback: return first supplier
-            if self.documents:
-                fallback = (
-                    self.documents[0].metadata.get("file_name", "Unknown").lower()
-                )
-                ctx.logger.warning(f"✗ Using fallback supplier: {fallback}")
-                return fallback
-            return None
-
-    async def filter_to_supplier(self, ctx: Context, supplier_name: str) -> bool:
-        """
-        Filter documents to include only the selected supplier.
-        This ensures RAG only retrieves data about the chosen supplier.
-        Handles name matching between LLM output and file names.
-        """
-        try:
-            # Normalize supplier name for matching
-            normalized_supplier = supplier_name.lower().replace("_", " ").strip()
-
-            # Find matching document using multiple strategies
-            filtered_docs = []
-            for doc in self.documents:
-                doc_file_name = (
-                    doc.metadata.get("file_name", "").lower().replace(".txt", "")
-                )
-
-                # Strategy 1: Exact match on file name
-                if normalized_supplier == doc_file_name.replace("_", " "):
-                    filtered_docs.append(doc)
-
-                # Strategy 2: Partial match (supplier name contains or is contained in file name)
-                elif normalized_supplier in doc_file_name.replace("_", " "):
-                    filtered_docs.append(doc)
-
-                elif doc_file_name.replace("_", " ") in normalized_supplier:
-                    filtered_docs.append(doc)
-
-                # Strategy 3: Key word matching
-                elif any(word in doc_file_name for word in normalized_supplier.split()):
-                    filtered_docs.append(doc)
-
-            if not filtered_docs:
-                ctx.logger.error(f"No documents found for supplier: '{supplier_name}'")
-                ctx.logger.error(f"Searched for: '{normalized_supplier}'")
-                ctx.logger.error(f"  Available files:")
-                for doc in self.documents:
-                    ctx.logger.error(
-                        f"    - {doc.metadata.get('file_name', 'Unknown')}"
-                    )
-                return False
-
-            # Re-index with only the selected supplier
-            self.documents = filtered_docs
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error filtering documents: {e}")
             import traceback
 
             traceback.print_exc()
