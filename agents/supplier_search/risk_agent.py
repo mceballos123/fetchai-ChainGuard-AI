@@ -38,7 +38,6 @@ risk_workflow = None
 async def startup(ctx: Context):
     """Initialize agent, RAG system, and LangGraph workflow on startup"""
     ctx.logger.info("Risk Management Agent starting up...")
-    ctx.logger.info(f"Agent address: {risk_agent.address}")
 
     # Initialize RAG system
     global rag_system, risk_workflow
@@ -48,12 +47,9 @@ async def startup(ctx: Context):
     success = await rag_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("Risk Management Agent ready with RAG system!")
-
         # Build LangGraph workflow
         if risk_workflow is None:
             risk_workflow = build_risk_workflow(rag_system, ctx)
-            ctx.logger.info("LangGraph risk management workflow built!")
     else:
         ctx.logger.warning("Risk Management Agent running in fallback mode (no RAG)")
 
@@ -73,22 +69,14 @@ async def startup(ctx: Context):
         },
     )
 
-    ctx.logger.info("Listening for RiskRequest messages...")
-
     # Verify connection on startup
-    conn_status = verify_risk_connection(ctx)
-    ctx.logger.info(f"Connection Status: {conn_status['status']}")
+    verify_risk_connection(ctx)
 
 
 @risk_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
     ctx.logger.info("Risk Management Agent shutting down...")
-
-    # Log final state before shutdown
-    supplier_history = ctx.storage.get("supplier_history") or []
-    ctx.logger.info(f"Total suppliers processed: {len(supplier_history)}")
-    ctx.logger.info("Workflow and RAG system cleanup complete")
 
 
 @risk_protocol.on_message(model=RiskRequest, replies=RiskResponse)
@@ -105,11 +93,9 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
        - success_node or error_node: prepare response
     4. Build RiskResponse from workflow result
     5. Return response to orchestrator
-    
+
     Note: Works in parallel with compliance_agent. Both must pass (>= 60) for supplier approval.
     """
-    ctx.logger.info(f"Received RiskRequest for {msg.supplier_name}")
-
     # Update current supplier state
     current_supplier_info = {
         "request_id": msg.request_id,

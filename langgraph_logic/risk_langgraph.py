@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Dict, Any, List, Optional, Literal
 from models.risk import RiskRequest, RiskResponse
 from langgraph_logic.state_schemas import SupplierWorkflowState
@@ -15,7 +14,6 @@ from uagents import Context
 from llama_index.core import (
     VectorStoreIndex,
     Settings,
-    SimpleDirectoryReader,
     Document,
 )
 from llama_index.core.node_parser import SimpleNodeParser
@@ -30,41 +28,7 @@ from llama_index.llms.ollama import Ollama
 
 load_dotenv()
 
-FILE_PATH = os.getenv("FILE_PATH_DOCUMENTS_RISK")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_RISK_MANGEMENT_INDEX_NAME")
-
-
-def _resolve_risk_path() -> Path:
-    """
-    Resolve the risk management files path with fallback options.
-    Ensures consistency across different environments and startups.
-
-    Priority:
-    1. Environment variable FILE_PATH_DOCUMENTS_RISK
-    2. Relative path from backend directory
-    3. Absolute path from current working directory
-    """
-    # Option 1: Use environment variable if set
-    if FILE_PATH and FILE_PATH != "None":
-        resolved = Path(FILE_PATH)
-        if resolved.exists():
-            return resolved
-
-    # Option 2: Try relative path from root directory
-    relative_path = Path(__file__).parent.parent / "risk_management_files"
-    if relative_path.exists():
-        return relative_path
-
-    # Option 3: Try from current working directory
-    cwd_path = Path.cwd() / "risk_management_files"
-    if cwd_path.exists():
-        return cwd_path
-
-    # Fallback: Return the most likely path
-    return relative_path
-
-
-RISK_FILES_DIR = _resolve_risk_path()
 EMBEDDING_DIMENSION = 768
 
 
@@ -100,8 +64,6 @@ class RiskRAGSystem:
         """
         driver = None
         try:
-            ctx.logger.info(f"Scraping B Corp page for risk analysis: {supplier_name}")
-
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
@@ -159,7 +121,6 @@ class RiskRAGSystem:
             if driver:
                 driver.quit()
 
-            ctx.logger.info(f"Successfully scraped risk data for {supplier_name}")
             return scraped_data
 
         except Exception as e:
@@ -182,105 +143,14 @@ class RiskRAGSystem:
 
     async def initialize(self, ctx: Context) -> bool:
         try:
-            ctx.logger.info("Initializing Risk Management RAG System...")
-
             if not await self._setup_pinecone(ctx):
                 return False
 
             self.initialized = True
-            ctx.logger.info("Risk Management RAG System initialized")
             return True
 
         except Exception as e:
             ctx.logger.error(f"Failed to initialize RAG system: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def _load_risk_files(self, ctx: Context) -> bool:
-        """Load only sunrise_sustainable risk management file"""
-        try:
-            # Load only the sunrise_sustainable file
-            file_path = RISK_FILES_DIR / "sunrise_sustainable.txt"
-
-            if not file_path.exists():
-                ctx.logger.error(f"Risk management file not found: {file_path}")
-                return False
-
-            ctx.logger.info(f"Loading risk management file: {file_path.name}")
-
-            # Use LlamaIndex to load the single document
-            reader = SimpleDirectoryReader(str(RISK_FILES_DIR), required_exts=[".txt"])
-            all_documents = reader.load_data()
-
-            # Filter to only sunrise_sustainable
-            self.documents = [
-                doc
-                for doc in all_documents
-                if "sunrise_sustainable" in doc.metadata.get("file_name", "").lower()
-            ]
-
-            if not self.documents:
-                ctx.logger.error(
-                    "Could not load sunrise_sustainable risk management file"
-                )
-                return False
-
-            ctx.logger.info(
-                f"Successfully loaded risk management document for sunrise_sustainable"
-            )
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error loading risk management files: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-    async def filter_to_supplier(self, ctx: Context, supplier_name: str) -> bool:
-        """Filter documents to include only the selected supplier"""
-        try:
-            ctx.logger.info(f"Filtering documents to supplier: {supplier_name}")
-
-            # Normalize supplier name for matching
-            normalized_supplier = supplier_name.lower().replace("_", " ").strip()
-            ctx.logger.info(f"Normalized search term: '{normalized_supplier}'")
-
-            # Find matching document
-            filtered_docs = []
-            for doc in self.documents:
-                doc_file_name = (
-                    doc.metadata.get("file_name", "").lower().replace(".txt", "")
-                )
-
-                # Multiple matching strategies
-                if (
-                    normalized_supplier == doc_file_name.replace("_", " ")
-                    or normalized_supplier in doc_file_name.replace("_", " ")
-                    or doc_file_name.replace("_", " ") in normalized_supplier
-                    or any(
-                        word in doc_file_name for word in normalized_supplier.split()
-                    )
-                ):
-                    filtered_docs.append(doc)
-
-            if not filtered_docs:
-                ctx.logger.error(
-                    f"No risk documents found for supplier: '{supplier_name}'"
-                )
-                return False
-
-            # Re-index with only the selected supplier
-            self.documents = filtered_docs
-            ctx.logger.info(
-                f"Filtered to {len(filtered_docs)} document(s) for: {supplier_name}"
-            )
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error filtering documents: {e}")
             import traceback
 
             traceback.print_exc()
@@ -301,15 +171,12 @@ class RiskRAGSystem:
             existing_indexes = [idx.name for idx in pc.list_indexes()]
 
             if PINECONE_INDEX_NAME not in existing_indexes:
-                ctx.logger.info(f"Creating new Pinecone index: {PINECONE_INDEX_NAME}")
                 pc.create_index(
                     name=PINECONE_INDEX_NAME,
                     dimension=EMBEDDING_DIMENSION,
                     metric="cosine",
                     spec=ServerlessSpec(cloud="aws", region="us-east-1"),
                 )
-            else:
-                ctx.logger.info(f"Using existing Pinecone index: {PINECONE_INDEX_NAME}")
 
             # Get Pinecone index
             pinecone_index = pc.Index(PINECONE_INDEX_NAME)
@@ -325,7 +192,6 @@ class RiskRAGSystem:
                 similarity_top_k=1, response_mode="compact", verbose=True
             )
 
-            ctx.logger.info("Pinecone vector store initialized")
             return True
 
         except Exception as e:
@@ -352,17 +218,7 @@ class RiskRAGSystem:
                 total_vectors = stats.get("total_vector_count", 0)
 
                 if total_vectors > 0:
-                    ctx.logger.info(
-                        f"Pinecone index already contains {total_vectors} vectors"
-                    )
-                    ctx.logger.info(
-                        "Skipping document indexing (documents already in vector DB)"
-                    )
                     return True
-                else:
-                    ctx.logger.info(
-                        "Pinecone index is empty, proceeding with document indexing..."
-                    )
             except Exception as e:
                 ctx.logger.warning(
                     f"Could not check index stats: {e}, proceeding with indexing..."
@@ -379,8 +235,6 @@ class RiskRAGSystem:
                 doc_nodes = parser.get_nodes_from_documents([doc])
                 nodes.extend(doc_nodes)
 
-            ctx.logger.info(f"Created {len(nodes)} document chunks")
-
             # Index nodes in Pinecone
             for node in nodes:
                 try:
@@ -388,7 +242,6 @@ class RiskRAGSystem:
                 except Exception as e:
                     ctx.logger.warning(f"Error indexing node: {e}")
 
-            ctx.logger.info("Documents indexed in Pinecone")
             return True
 
         except Exception as e:
@@ -417,7 +270,6 @@ class RiskRAGSystem:
                 except Exception as e:
                     ctx.logger.warning(f"Error indexing node: {e}")
 
-            ctx.logger.info("Risk document indexed in Pinecone")
             return True
 
         except Exception as e:
@@ -462,7 +314,6 @@ class RiskRAGSystem:
                 )
                 b_corp_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/company/{supplier_slug}"
 
-            ctx.logger.info(f"Scraping B Corp data for risk analysis: {supplier_name}")
             scraped_data = await self.scrape_bcorp_supplier_page(
                 ctx, supplier_name, b_corp_url
             )
@@ -698,15 +549,9 @@ def risk_check_node(
     Input: supplier_name, industry, b_corp_profile_url (optional)
     Output: risk_score, risk_details, risk_factors
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("[LangGraph Node: risk_check] SCRAPING & ANALYZING")
-    ctx.logger.info("=" * 70)
-
     try:
         supplier_name = state.get("supplier_name", "Unknown")
         b_corp_url = state.get("b_corp_profile_url")
-
-        ctx.logger.info(f"Analyzing risk for: {supplier_name}")
 
         # Run RAG query for risk management (includes scraping)
         rag_result = rag_system.query_risk_documents_sync(
@@ -721,13 +566,12 @@ def risk_check_node(
         state["risk_factors"] = rag_result.get("risk_factors", [])
         state["current_step"] = "risk_check_complete"
 
-        ctx.logger.info(f"Risk Score: {state['risk_score']}/100")
-
         return state
 
     except Exception as e:
         ctx.logger.error(f"Error in risk check: {e}")
         import traceback
+
         traceback.print_exc()
 
         state["current_step"] = "risk_check_failed"
@@ -767,17 +611,8 @@ def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflow
     """
     Node 3a: Success path - Supplier meets risk management requirements.
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("SUCCESS NODE - RISK MANAGEMENT APPROVED")
-    ctx.logger.info("=" * 70)
-
     state["current_step"] = "risk_approved"
     state["should_continue"] = False
-
-    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
-    ctx.logger.info(f"Score: {state['risk_score']}/100")
-    ctx.logger.info(f"Status: APPROVED - Ready to send to orchestrator")
-    ctx.logger.info("=" * 70)
 
     return state
 
@@ -786,18 +621,6 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     """
     Node 3b: Error path - Supplier does not meet requirements.
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("ERROR NODE - RISK MANAGEMENT REJECTED")
-    ctx.logger.info("=" * 70)
-
-    risk_score = state.get("risk_score", 0.0)
-    error_msg = state.get("error_message", "Unknown error")
-
-    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
-    ctx.logger.info(f"Score: {risk_score}/100")
-    ctx.logger.info(f"Error: {error_msg}")
-    ctx.logger.info("=" * 70)
-
     state["current_step"] = "risk_rejected"
     state["should_continue"] = False
 
@@ -820,8 +643,6 @@ def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
     Returns:
         Compiled StateGraph workflow
     """
-    ctx.logger.info("Building Risk Management LangGraph Workflow...")
-
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
 
@@ -847,7 +668,5 @@ def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
 
     # Compile workflow
     compiled_workflow = workflow.compile()
-
-    ctx.logger.info("Risk management workflow built successfully!")
 
     return compiled_workflow
