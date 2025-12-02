@@ -8,6 +8,7 @@ class FindSupplierRequest(Model):
     request_id: str
     user_query: str
     business_category: str
+    timestamp: str = ""
 
 
 class SupplierSearchResult(Model):
@@ -31,3 +32,4 @@ class FindSupplierResponse(Model):
     total_results_found: int = 0
     search_summary: str = ""
     error_message: str = ""
+    timestamp: str = ""
