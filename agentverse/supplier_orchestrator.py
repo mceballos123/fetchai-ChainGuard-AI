@@ -608,7 +608,7 @@ find_supplier_protocol = Protocol(name="find_supplier_response_protocol", versio
 async def handle_find_supplier_response(
     ctx: Context, sender: str, msg: FindSupplierResponse
 ):
-    """Handle find supplier response and send result to user"""
+    """Handle find supplier response and forward to 3 analysis agents in parallel"""
     ctx.logger.info("=" * 70)
     ctx.logger.info("📥 RECEIVED FIND SUPPLIER RESPONSE")
     ctx.logger.info("=" * 70)
@@ -640,6 +640,7 @@ async def handle_find_supplier_response(
         ctx.storage.set("pending_responses", pending_responses)
 
         user_sender = pending_responses[msg.request_id].get("sender")
+        user_query = pending_responses[msg.request_id].get("user_query")
 
         if not user_sender:
             ctx.logger.error(f"No sender found for request {msg.request_id}")
@@ -696,67 +697,149 @@ async def handle_find_supplier_response(
 
             return
 
-        # Build successful response message
+        # Supplier found successfully - Store it and forward to analysis agents
         ctx.logger.info(f"✅ Best Supplier Found: {best_supplier.company_name}")
         ctx.logger.info(f"Location: {best_supplier.location}")
         ctx.logger.info(f"Industry: {best_supplier.industry}")
         ctx.logger.info(f"Total Results: {msg.total_results_found}")
 
-        response_text = f"""
-✅ SUPPLIER FOUND
+        # Store the selected supplier for monitoring
+        ctx.storage.set("selected_supplier", best_supplier.company_name)
+        ctx.logger.info(f"Stored supplier for monitoring: {best_supplier.company_name}")
 
-We found a B Corporation certified company in the {msg.search_category} category.
-
-SELECTED SUPPLIER:
-
-Company Name: {best_supplier.company_name}
-Location: {best_supplier.location}
-Industry: {best_supplier.industry}
-Description: {best_supplier.description}
-
-B Corp Profile: {best_supplier.b_corp_profile_url}
-
----
-
-NEXT STEPS:
-This supplier will now be analyzed by our compliance, financial, and risk management teams to ensure they meet all partnership requirements.
-
-(Note: In the future, this analysis will happen automatically. For now, we're showing you the supplier we found.)
-        """
-
-        # Send response to user
-        success_response = ChatMessage(
-            timestamp="",
-            msg_id=uuid4(),
-            content=[
-                TextContent(type="text", text=response_text.strip()),
-                EndSessionContent(type="end-session"),
-            ],
-        )
-
-        await ctx.send(user_sender, success_response)
-
-        log_message_transmission(
-            ctx,
-            "SENT",
-            "ChatMessage",
-            str(success_response.msg_id),
-            {
-                "type": "find_supplier_success",
-                "supplier": best_supplier.company_name,
-            },
-        )
-
-        ctx.logger.info("✅ Find supplier result sent to user")
+        # NOW FORWARD TO 3 ANALYSIS AGENTS IN PARALLEL
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("FORWARDING TO ANALYSIS AGENTS (COMPLIANCE, FINANCIAL, RISK)")
         ctx.logger.info("=" * 70)
 
-        # Clean up session
-        active_sessions = ctx.storage.get("active_sessions") or {}
-        active_sessions.pop(msg.request_id, None)
-        ctx.storage.set("active_sessions", active_sessions)
+        try:
+            # Send to Compliance Agent
+            ctx.logger.info(f"Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+            compliance_request = ComplianceRequest(
+                request_id=msg.request_id,
+                supplier_name=best_supplier.company_name,
+                industry=best_supplier.industry or "general",
+                company_values=user_query,
+                b_corp_profile_url=best_supplier.b_corp_profile_url or "",
+                timestamp="",
+            )
 
-        pending_responses.pop(msg.request_id, None)
-        ctx.storage.set("pending_responses", pending_responses)
+            # Validate request before sending
+            is_valid, error_msg = validate_request_before_sending(
+                ctx, compliance_request
+            )
+            if not is_valid:
+                raise ValueError(f"Compliance request validation failed: {error_msg}")
+
+            await ctx.send(COMPLIANCE_AGENT_ADDRESS, compliance_request)
+
+            # Log transmission
+            log_message_transmission(
+                ctx,
+                "SENT",
+                "ComplianceRequest",
+                msg.request_id,
+                {
+                    "supplier_name": compliance_request.supplier_name,
+                    "industry": compliance_request.industry,
+                },
+            )
+
+            ctx.logger.info(f"✅ ComplianceRequest sent to Compliance Agent")
+
+            # Send to Financial Agent
+            ctx.logger.info(f"Sending to Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
+
+            # Extract country from location (e.g., "San Francisco, USA" -> "USA")
+            supplier_country = best_supplier.location or "United States"
+            if "," in supplier_country:
+                # Extract country from "City, Country" format
+                supplier_country = supplier_country.split(",")[-1].strip()
+
+            financial_request = FinancialRequest(
+                request_id=msg.request_id,
+                supplier_name=best_supplier.company_name,
+                supplier_country=supplier_country,
+                industry=best_supplier.industry or "general",
+                timestamp="",
+            )
+
+            await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
+
+            log_message_transmission(
+                ctx,
+                "SENT",
+                "FinancialRequest",
+                msg.request_id,
+                {
+                    "supplier_name": financial_request.supplier_name,
+                    "supplier_country": financial_request.supplier_country,
+                    "industry": financial_request.industry,
+                },
+            )
+
+            ctx.logger.info(f"✅ FinancialRequest sent to Financial Agent")
+
+            # Send to Risk Agent
+            ctx.logger.info(f"Sending to Risk Agent: {RISK_AGENT_ADDRESS}")
+            risk_request = RiskRequest(
+                request_id=msg.request_id,
+                supplier_name=best_supplier.company_name,
+                industry=best_supplier.industry or "general",
+                b_corp_profile_url=best_supplier.b_corp_profile_url or None,
+                timestamp="",
+            )
+
+            await ctx.send(RISK_AGENT_ADDRESS, risk_request)
+
+            log_message_transmission(
+                ctx,
+                "SENT",
+                "RiskRequest",
+                msg.request_id,
+                {
+                    "supplier_name": risk_request.supplier_name,
+                    "industry": risk_request.industry,
+                },
+            )
+
+            ctx.logger.info(f"✅ RiskRequest sent to Risk Agent")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info(
+                "WAITING FOR ALL 3 ANALYSIS RESPONSES (Compliance, Financial, Risk)..."
+            )
+            ctx.logger.info("=" * 70)
+
+        except Exception as e:
+            ctx.logger.error(f"Error sending to analysis agents: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+            # Clean up pending responses
+            pending_responses.pop(msg.request_id, None)
+            ctx.storage.set("pending_responses", pending_responses)
+
+            # Send error response to user
+            error_response = ChatMessage(
+                timestamp="",
+                msg_id=uuid4(),
+                content=[
+                    TextContent(
+                        type="text",
+                        text=f"Error forwarding supplier to analysis agents: {str(e)}",
+                    ),
+                    EndSessionContent(type="end-session"),
+                ],
+            )
+            await ctx.send(user_sender, error_response)
+            log_message_transmission(
+                ctx,
+                "SENT",
+                "ChatMessage",
+                str(error_response.msg_id),
+                {"type": "error"},
+            )
 
     except Exception as e:
         ctx.logger.error(f"❌ Error handling find supplier response: {e}")
