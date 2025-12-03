@@ -128,7 +128,17 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
     5. Build ComplianceResponse from workflow result
     6. Return response to orchestrator
     """
-    ctx.logger.info(f"Received ComplianceRequest for {msg.supplier_name}")
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📥 COMPLIANCE AGENT: RECEIVED REQUEST")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
+    ctx.logger.info(f"Industry: {msg.industry}")
+    ctx.logger.info(f"Company Values: {msg.company_values[:50]}...")
+    ctx.logger.info(f"B Corp Profile URL: {msg.b_corp_profile_url}")
+    ctx.logger.info("=" * 70)
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -153,8 +163,10 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         # === USING LANGGRAPH WORKFLOW WITH RAG ===
 
         if compliance_workflow is None:
-            ctx.logger.error("Compliance workflow not initialized!")
+            ctx.logger.error("❌ Compliance workflow not initialized!")
             raise RuntimeError("Compliance workflow not ready")
+
+        ctx.logger.info("🔄 Starting LangGraph compliance workflow...")
 
         # Create workflow state from request
         workflow_state = SupplierWorkflowState(
@@ -190,11 +202,20 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
 
         result = compliance_workflow.invoke(workflow_state)
 
+        ctx.logger.info("✅ LangGraph workflow completed")
+
         # Extract results
         compliance_score = result.get("compliance_score", 70.0)
         ethics_info = result.get("ethics_info", "Analysis complete")
         sustainability_info = result.get("sustainability_info", "Analysis complete")
         violations = result.get("violations", [])
+
+        ctx.logger.info(f"Compliance Analysis Results:")
+        ctx.logger.info(f"  - Score: {compliance_score}/100")
+        ctx.logger.info(f"  - Violations: {len(violations)}")
+        ctx.logger.info(
+            f"  - Status: {'APPROVED' if compliance_score >= 75 else 'REJECTED'}"
+        )
 
         # Build response
         response = ComplianceResponse(
@@ -241,6 +262,15 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         )
 
         # Send response back to sender (Orchestrator Agent)
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("📤 COMPLIANCE AGENT: SENDING RESPONSE")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info(f"To: {sender}")
+        ctx.logger.info(f"Request ID: {msg.request_id}")
+        ctx.logger.info(f"Compliance Score: {response.compliance_score}/100")
+        ctx.logger.info("=" * 70)
+
         await ctx.send(sender, response)
 
     except Exception as e:

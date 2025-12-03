@@ -539,9 +539,16 @@ async def handle_compliance_response(
     ctx: Context, sender: str, msg: ComplianceResponse
 ):
     """Handle compliance response and wait for other responses before sending to user"""
-    ctx.logger.info("=" * 60)
-    ctx.logger.info("Received Compliance Response (1/3)")
-    ctx.logger.info("=" * 60)
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📨 [1/3] RECEIVED COMPLIANCE RESPONSE")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier: {msg.supplier_name}")
+    ctx.logger.info(f"Compliance Score: {msg.compliance_score}/100")
+    ctx.logger.info(f"Violations Count: {len(msg.violations)}")
+    ctx.logger.info("=" * 70)
 
     # Verify message received from Compliance Agent
     log_message_transmission(
@@ -698,23 +705,42 @@ async def handle_find_supplier_response(
             return
 
         # Supplier found successfully - Store it and forward to analysis agents
-        ctx.logger.info(f"✅ Best Supplier Found: {best_supplier.company_name}")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("✅ SUPPLIER SUCCESSFULLY FOUND")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info(f"Supplier Name: {best_supplier.company_name}")
         ctx.logger.info(f"Location: {best_supplier.location}")
         ctx.logger.info(f"Industry: {best_supplier.industry}")
-        ctx.logger.info(f"Total Results: {msg.total_results_found}")
+        ctx.logger.info(f"B Corp Profile: {best_supplier.b_corp_profile_url}")
+        ctx.logger.info(f"Description: {best_supplier.description}")
+        ctx.logger.info(f"Total Results Found: {msg.total_results_found}")
+        ctx.logger.info(f"Search Category: {msg.search_category}")
+        ctx.logger.info("=" * 70)
 
         # Store the selected supplier for monitoring
         ctx.storage.set("selected_supplier", best_supplier.company_name)
-        ctx.logger.info(f"Stored supplier for monitoring: {best_supplier.company_name}")
+        ctx.logger.info(
+            f"✅ Stored supplier for monitoring: {best_supplier.company_name}"
+        )
 
         # NOW FORWARD TO 3 ANALYSIS AGENTS IN PARALLEL
+        ctx.logger.info("")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("FORWARDING TO ANALYSIS AGENTS (COMPLIANCE, FINANCIAL, RISK)")
+        ctx.logger.info("🚀 FORWARDING TO 3 ANALYSIS AGENTS IN PARALLEL")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("Will send requests to:")
+        ctx.logger.info(f"  1. Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+        ctx.logger.info(f"  2. Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
+        ctx.logger.info(f"  3. Risk Agent: {RISK_AGENT_ADDRESS}")
         ctx.logger.info("=" * 70)
 
         try:
             # Send to Compliance Agent
-            ctx.logger.info(f"Sending to Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
+            ctx.logger.info("")
+            ctx.logger.info("📤 [1/3] SENDING TO COMPLIANCE AGENT")
+            ctx.logger.info(f"Agent Address: {COMPLIANCE_AGENT_ADDRESS}")
+            ctx.logger.info(f"Request ID: {msg.request_id}")
+
             compliance_request = ComplianceRequest(
                 request_id=msg.request_id,
                 supplier_name=best_supplier.company_name,
@@ -723,6 +749,14 @@ async def handle_find_supplier_response(
                 b_corp_profile_url=best_supplier.b_corp_profile_url or "",
                 timestamp="",
             )
+
+            ctx.logger.info(f"Compliance Request Details:")
+            ctx.logger.info(f"  - Supplier: {compliance_request.supplier_name}")
+            ctx.logger.info(f"  - Industry: {compliance_request.industry}")
+            ctx.logger.info(
+                f"  - Company Values: {compliance_request.company_values[:50]}..."
+            )
+            ctx.logger.info(f"  - B Corp URL: {compliance_request.b_corp_profile_url}")
 
             # Validate request before sending
             is_valid, error_msg = validate_request_before_sending(
@@ -745,16 +779,23 @@ async def handle_find_supplier_response(
                 },
             )
 
-            ctx.logger.info(f"✅ ComplianceRequest sent to Compliance Agent")
+            ctx.logger.info(
+                f"✅ ComplianceRequest successfully sent to Compliance Agent"
+            )
+            ctx.logger.info("")
 
             # Send to Financial Agent
-            ctx.logger.info(f"Sending to Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
+            ctx.logger.info("📤 [2/3] SENDING TO FINANCIAL AGENT")
+            ctx.logger.info(f"Agent Address: {FINANCIAL_AGENT_ADDRESS}")
+            ctx.logger.info(f"Request ID: {msg.request_id}")
 
             # Extract country from location (e.g., "San Francisco, USA" -> "USA")
             supplier_country = best_supplier.location or "United States"
+            ctx.logger.info(f"Original Location: {best_supplier.location}")
             if "," in supplier_country:
                 # Extract country from "City, Country" format
                 supplier_country = supplier_country.split(",")[-1].strip()
+            ctx.logger.info(f"Extracted Country: {supplier_country}")
 
             financial_request = FinancialRequest(
                 request_id=msg.request_id,
@@ -763,6 +804,11 @@ async def handle_find_supplier_response(
                 industry=best_supplier.industry or "general",
                 timestamp="",
             )
+
+            ctx.logger.info(f"Financial Request Details:")
+            ctx.logger.info(f"  - Supplier: {financial_request.supplier_name}")
+            ctx.logger.info(f"  - Country: {financial_request.supplier_country}")
+            ctx.logger.info(f"  - Industry: {financial_request.industry}")
 
             await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
 
@@ -778,10 +824,14 @@ async def handle_find_supplier_response(
                 },
             )
 
-            ctx.logger.info(f"✅ FinancialRequest sent to Financial Agent")
+            ctx.logger.info(f"✅ FinancialRequest successfully sent to Financial Agent")
+            ctx.logger.info("")
 
             # Send to Risk Agent
-            ctx.logger.info(f"Sending to Risk Agent: {RISK_AGENT_ADDRESS}")
+            ctx.logger.info("📤 [3/3] SENDING TO RISK AGENT")
+            ctx.logger.info(f"Agent Address: {RISK_AGENT_ADDRESS}")
+            ctx.logger.info(f"Request ID: {msg.request_id}")
+
             risk_request = RiskRequest(
                 request_id=msg.request_id,
                 supplier_name=best_supplier.company_name,
@@ -789,6 +839,11 @@ async def handle_find_supplier_response(
                 b_corp_profile_url=best_supplier.b_corp_profile_url or None,
                 timestamp="",
             )
+
+            ctx.logger.info(f"Risk Request Details:")
+            ctx.logger.info(f"  - Supplier: {risk_request.supplier_name}")
+            ctx.logger.info(f"  - Industry: {risk_request.industry}")
+            ctx.logger.info(f"  - B Corp URL: {risk_request.b_corp_profile_url}")
 
             await ctx.send(RISK_AGENT_ADDRESS, risk_request)
 
@@ -803,11 +858,15 @@ async def handle_find_supplier_response(
                 },
             )
 
-            ctx.logger.info(f"✅ RiskRequest sent to Risk Agent")
+            ctx.logger.info(f"✅ RiskRequest successfully sent to Risk Agent")
+            ctx.logger.info("")
             ctx.logger.info("=" * 70)
-            ctx.logger.info(
-                "WAITING FOR ALL 3 ANALYSIS RESPONSES (Compliance, Financial, Risk)..."
-            )
+            ctx.logger.info("⏳ WAITING FOR ALL 3 ANALYSIS RESPONSES")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info("Expecting responses from:")
+            ctx.logger.info("  [ ] Compliance Agent")
+            ctx.logger.info("  [ ] Financial Agent")
+            ctx.logger.info("  [ ] Risk Agent")
             ctx.logger.info("=" * 70)
 
         except Exception as e:
@@ -851,9 +910,16 @@ async def handle_find_supplier_response(
 @financial_protocol.on_message(model=FinancialResponse)
 async def handle_financial_response(ctx: Context, sender: str, msg: FinancialResponse):
     """Handle financial response and wait for other responses before sending to user"""
-    ctx.logger.info("=" * 60)
-    ctx.logger.info("Received Financial Response (2/3)")
-    ctx.logger.info("=" * 60)
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📨 [2/3] RECEIVED FINANCIAL RESPONSE")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier: {msg.supplier_name}")
+    ctx.logger.info(f"Financial Score: {msg.financial_score}/100")
+    ctx.logger.info(f"Risk Factors Count: {len(msg.risk_factors)}")
+    ctx.logger.info("=" * 70)
 
     # Verify message received from Financial Agent
     log_message_transmission(
@@ -897,9 +963,18 @@ async def handle_financial_response(ctx: Context, sender: str, msg: FinancialRes
 @risk_protocol.on_message(model=RiskResponse)
 async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
     """Handle risk response and wait for other responses before sending to user"""
-    ctx.logger.info("=" * 60)
-    ctx.logger.info("Received Risk Response (3/3)")
-    ctx.logger.info("=" * 60)
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📨 [3/3] RECEIVED RISK RESPONSE")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier: {msg.supplier_name}")
+    ctx.logger.info(f"Risk Score: {msg.risk_score}/100")
+    ctx.logger.info(
+        f"Risk Factors Count: {len(msg.risk_factors) if msg.risk_factors else 0}"
+    )
+    ctx.logger.info("=" * 70)
 
     # Verify message received from Risk Agent
     log_message_transmission(

@@ -126,10 +126,19 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
        - success_node or error_node: prepare response
     5. Build FinancialResponse from workflow result
     6. Return response to orchestrator
-    
+
     Note: Country information is critical - used to query Trade War Tracker for tariff/inflation data
     """
-    ctx.logger.info(f"Received FinancialRequest for {msg.supplier_name} in {msg.supplier_country}")
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📥 FINANCIAL AGENT: RECEIVED REQUEST")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
+    ctx.logger.info(f"Supplier Country: {msg.supplier_country}")
+    ctx.logger.info(f"Industry: {msg.industry}")
+    ctx.logger.info("=" * 70)
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -154,8 +163,13 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         # === USING LANGGRAPH WORKFLOW WITH RAG ===
 
         if financial_workflow is None:
-            ctx.logger.error("Financial workflow not initialized!")
+            ctx.logger.error("❌ Financial workflow not initialized!")
             raise RuntimeError("Financial workflow not ready")
+
+        ctx.logger.info("🔄 Starting LangGraph financial workflow...")
+        ctx.logger.info(
+            f"Will analyze tariff/inflation data for: {msg.supplier_country}"
+        )
 
         # Create workflow state from request
         workflow_state = SupplierWorkflowState(
@@ -188,10 +202,19 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
         result = financial_workflow.invoke(workflow_state)
 
+        ctx.logger.info("✅ LangGraph workflow completed")
+
         # Extract results
         financial_score = result.get("financial_score", 70.0)
         financial_details = result.get("financial_info", "Analysis complete")
         risk_factors = result.get("risk_factors", [])
+
+        ctx.logger.info(f"Financial Analysis Results:")
+        ctx.logger.info(f"  - Score: {financial_score}/100")
+        ctx.logger.info(f"  - Risk Factors: {len(risk_factors)}")
+        ctx.logger.info(
+            f"  - Status: {'APPROVED' if financial_score >= 60 else 'REJECTED'}"
+        )
 
         # Build response
         response = FinancialResponse(
@@ -235,6 +258,15 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         )
 
         # Send response back to sender (Orchestrator Agent)
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("📤 FINANCIAL AGENT: SENDING RESPONSE")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info(f"To: {sender}")
+        ctx.logger.info(f"Request ID: {msg.request_id}")
+        ctx.logger.info(f"Financial Score: {response.financial_score}/100")
+        ctx.logger.info("=" * 70)
+
         await ctx.send(sender, response)
 
     except Exception as e:
