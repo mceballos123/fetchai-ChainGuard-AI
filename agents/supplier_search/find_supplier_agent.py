@@ -437,10 +437,18 @@ def select_best_supplier(
 async def handle_find_supplier_request(
     ctx: Context, sender: str, msg: FindSupplierRequest
 ):
-    ctx.logger.info(f"Received request {msg.request_id}: {msg.user_query}")
-    ctx.logger.info("=" * 60)
-    ctx.logger.info("Starting LangGraph Supplier Search Workflow")
-    ctx.logger.info("=" * 60)
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📥 FIND SUPPLIER AGENT: RECEIVED REQUEST")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"User Query: {msg.user_query}")
+    ctx.logger.info(f"Business Category: {msg.business_category}")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("")
+    ctx.logger.info("🔍 Starting LangGraph Supplier Search Workflow...")
+    ctx.logger.info("=" * 70)
 
     try:
         processed_ids = ctx.storage.get("processed_request_ids") or []
@@ -470,16 +478,26 @@ async def handle_find_supplier_request(
             "ctx": ctx,
         }
 
-        ctx.logger.info(f"Executing LangGraph workflow for category: {search_category}")
+        ctx.logger.info(
+            f"🔄 Executing LangGraph workflow for category: {search_category}"
+        )
+        ctx.logger.info(f"Will search B Corp directory...")
 
         final_state = supplier_search_graph.invoke(initial_state)
 
-        ctx.logger.info("=" * 60)
-        ctx.logger.info("LangGraph Workflow Completed")
-        ctx.logger.info("=" * 60)
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("✅ LangGraph Workflow Completed")
+        ctx.logger.info("=" * 70)
 
         if final_state["success"] and final_state["best_supplier"]:
             best_supplier = final_state["best_supplier"]
+
+            ctx.logger.info("✅ Supplier Found Successfully!")
+            ctx.logger.info(f"Company Name: {best_supplier.company_name}")
+            ctx.logger.info(f"Location: {best_supplier.location}")
+            ctx.logger.info(f"Industry: {best_supplier.industry}")
+            ctx.logger.info(f"B Corp Profile: {best_supplier.b_corp_profile_url}")
 
             response = FindSupplierResponse(
                 request_id=msg.request_id,
@@ -501,9 +519,23 @@ async def handle_find_supplier_request(
             )
             ctx.storage.set("search_history", search_history)
 
-            ctx.logger.info(f"Sending success response: {best_supplier.company_name}")
+            ctx.logger.info("")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info("📤 FIND SUPPLIER AGENT: SENDING RESPONSE")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info(f"To: {sender}")
+            ctx.logger.info(f"Request ID: {msg.request_id}")
+            ctx.logger.info(f"Success: True")
+            ctx.logger.info(f"Supplier: {best_supplier.company_name}")
+            ctx.logger.info("=" * 70)
+
             await ctx.send(sender, response)
         else:
+            ctx.logger.warning("❌ No supplier found")
+            ctx.logger.warning(
+                f"Error: {final_state.get('error_message', 'No suppliers found')}"
+            )
+
             error_response = FindSupplierResponse(
                 request_id=msg.request_id,
                 success=False,
@@ -513,7 +545,16 @@ async def handle_find_supplier_request(
                 error_message=final_state.get("error_message", "No suppliers found"),
             )
 
-            ctx.logger.error(f"Sending error response: {error_response.error_message}")
+            ctx.logger.info("")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info("📤 FIND SUPPLIER AGENT: SENDING ERROR RESPONSE")
+            ctx.logger.info("=" * 70)
+            ctx.logger.info(f"To: {sender}")
+            ctx.logger.info(f"Request ID: {msg.request_id}")
+            ctx.logger.info(f"Success: False")
+            ctx.logger.info(f"Error: {error_response.error_message}")
+            ctx.logger.info("=" * 70)
+
             await ctx.send(sender, error_response)
 
     except Exception as e:
