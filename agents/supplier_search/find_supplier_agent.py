@@ -50,12 +50,99 @@ class SupplierSearchState(TypedDict):
     ctx: Optional[Context]
 
 
+def extract_country_from_location(location_text: str) -> Optional[str]:
+    """
+    Extract country name from a location string.
+    Example: "Buenos Aires Province, Argentina" -> "Argentina"
+    """
+    if not location_text:
+        return None
+
+    known_countries = [
+        "Argentina",
+        "Brazil",
+        "Chile",
+        "Colombia",
+        "Mexico",
+        "Peru",
+        "Uruguay",
+        "Venezuela",
+        "Ecuador",
+        "Bolivia",
+        "Paraguay",
+        "United States",
+        "USA",
+        "Canada",
+        "United Kingdom",
+        "UK",
+        "Germany",
+        "France",
+        "Spain",
+        "Italy",
+        "Netherlands",
+        "Belgium",
+        "Switzerland",
+        "Austria",
+        "Portugal",
+        "Sweden",
+        "Norway",
+        "Denmark",
+        "Finland",
+        "Ireland",
+        "Australia",
+        "New Zealand",
+        "Japan",
+        "China",
+        "India",
+        "South Korea",
+        "Singapore",
+        "Taiwan",
+        "Thailand",
+        "Vietnam",
+        "Indonesia",
+        "Malaysia",
+        "Philippines",
+        "South Africa",
+        "Kenya",
+        "Nigeria",
+        "Egypt",
+        "Morocco",
+        "Israel",
+        "United Arab Emirates",
+        "Saudi Arabia",
+    ]
+
+    location_lower = location_text.lower()
+
+    for country in known_countries:
+        if country.lower() in location_lower:
+            return country
+
+    # If no known country found, try to get the last part after comma
+    parts = location_text.split(",")
+    if len(parts) > 1:
+        potential_country = parts[-1].strip()
+        if len(potential_country) > 2:
+            return potential_country
+
+    return None
+
+
 async def search_b_corp_directory(
     ctx: Context, category: str, max_results: int = 1
 ) -> Dict[str, Any]:
+    """
+    Search B Corp directory and extract supplier name + country.
+
+    Process:
+    1. Search B Corp directory
+    2. Click on first company profile
+    3. Extract company name and COUNTRY from profile (Headquarters section)
+    4. Country will be sent to financial agent for tariff/inflation analysis
+    """
     driver = None
     try:
-        ctx.logger.info(f"Searching B Corp directory for: {category}")
+        ctx.logger.info(f"🔍 Searching B Corp directory for: {category}")
 
         search_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/?query={category}&sortBy=companies-production-en-us"
 
@@ -70,18 +157,44 @@ async def search_b_corp_directory(
         )
 
         driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(30)
+        driver.set_page_load_timeout(60)
         driver.get(search_url)
-        time.sleep(5)
+        time.sleep(8)
+
+        first_company = None
+        company_country = None
+        profile_url = None
+
+        # Try to find and click first company profile
+        try:
+            company_links = driver.find_elements(
+                By.CSS_SELECTOR, 'a[href*="/find-a-b-corp/company/"]'
+            )
+
+            if company_links:
+                profile_url = company_links[0].get_attribute("href")
+                ctx.logger.info(f"📍 Found company profile: {profile_url}")
+                driver.get(profile_url)
+                time.sleep(5)
+                ctx.logger.info("🌐 Loaded company profile page")
+        except Exception as e:
+            ctx.logger.warning(f"Could not navigate to profile: {e}")
 
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, "html.parser")
 
-        first_company = None
+        # Extract company name
+        h1_tag = soup.find("h1")
+        if h1_tag:
+            potential_name = h1_tag.get_text(strip=True)
+            if potential_name and len(potential_name) > 2 and len(potential_name) < 100:
+                first_company = potential_name
+                ctx.logger.info(f"✅ Found company name: {first_company}")
 
-        company_span = soup.find("span", {"data-testid": "company-name-desktop"})
-        if company_span:
-            first_company = company_span.get_text(strip=True)
+        if not first_company:
+            company_span = soup.find("span", {"data-testid": "company-name-desktop"})
+            if company_span:
+                first_company = company_span.get_text(strip=True)
 
         if not first_company:
             company_span = soup.find("span", {"data-testid": "company-name-mobile"})
@@ -89,90 +202,116 @@ async def search_b_corp_directory(
                 first_company = company_span.get_text(strip=True)
 
         if not first_company:
-            company_spans = soup.find_all(
-                "span", {"data-testid": re.compile("company-name")}
-            )
-            if company_spans:
-                first_company = company_spans[0].get_text(strip=True)
-
-        if not first_company:
             pattern = r'data-testid="company-name[^"]*"[^>]*>([^<]+)</span>'
             matches = re.findall(pattern, html_content, re.IGNORECASE)
             if matches:
                 first_company = matches[0].strip()
 
-        if not first_company:
-            company_patterns = [
-                r'<span[^>]*class="[^"]*text-xl[^"]*font-medium[^"]*"[^>]*>([^<]+)</span>',
-                r'"name"\s*:\s*"([^"]+)"',
-                r'"companyName"\s*:\s*"([^"]+)"',
-            ]
+        # Extract country - CRITICAL for financial analysis
+        ctx.logger.info("🌍 Extracting supplier country...")
 
-            for pattern in company_patterns:
-                matches = re.findall(pattern, html_content, re.IGNORECASE)
-                if matches:
-                    for match in matches:
-                        cleaned = match.strip()
-                        if cleaned and len(cleaned) > 3 and len(cleaned) < 100:
-                            skip_words = [
-                                "showing",
-                                "sort",
-                                "filter",
-                                "location",
-                                "ownership",
-                                "more filters",
-                                "find a b corp",
-                            ]
-                            if not any(skip in cleaned.lower() for skip in skip_words):
-                                first_company = cleaned
-                                break
-                if first_company:
+        # Method 1: Look for Headquarters section
+        all_text = soup.get_text(separator="|", strip=True)
+
+        hq_patterns = [
+            r"Headquarters\|([^|]+)",
+            r"Headquarters([A-Za-z\s,]+(?:Argentina|Brazil|Chile|Colombia|Mexico|Peru|United States|Canada|United Kingdom|Germany|France|Spain|Italy|Australia|Japan|China|India))",
+        ]
+
+        for pattern in hq_patterns:
+            match = re.search(pattern, all_text, re.IGNORECASE)
+            if match:
+                headquarters_text = match.group(1).strip()
+                ctx.logger.info(f"   Found Headquarters: {headquarters_text}")
+                company_country = extract_country_from_location(headquarters_text)
+                if company_country:
+                    ctx.logger.info(f"   ✅ Country: {company_country}")
                     break
 
-        if not first_company:
-            json_pattern = r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}'
-            json_matches = re.findall(json_pattern, html_content)
-            if json_matches:
-                for match in json_matches:
-                    if match and len(match) > 3 and len(match) < 100:
-                        first_company = match.strip()
-                        break
+        # Method 2: Search for known countries in context
+        if not company_country:
+            known_countries = [
+                ("Argentina", ["Buenos Aires", "Argentina"]),
+                ("Brazil", ["Brazil", "São Paulo"]),
+                ("Chile", ["Chile", "Santiago"]),
+                ("Colombia", ["Colombia", "Bogotá"]),
+                ("Mexico", ["Mexico", "México"]),
+                ("Peru", ["Peru", "Lima"]),
+                ("United States", ["United States", "USA"]),
+                ("Canada", ["Canada"]),
+                ("United Kingdom", ["United Kingdom", "UK"]),
+            ]
 
-        unique_companies = []
-        if first_company:
-            unique_companies = [first_company]
-            ctx.logger.info(f"Found company: {first_company}")
-        else:
-            ctx.logger.warning("Could not extract company name from page")
+            for country, keywords in known_countries:
+                for keyword in keywords:
+                    if keyword.lower() in html_content.lower():
+                        context_patterns = [
+                            rf"Headquarters[^<]*{keyword}",
+                            rf"{keyword}[^<]*Province",
+                            rf"Province[^<]*{keyword}",
+                        ]
+                        for ctx_pattern in context_patterns:
+                            if re.search(ctx_pattern, html_content, re.IGNORECASE):
+                                company_country = country
+                                ctx.logger.info(
+                                    f"   ✅ Country (via context): {country}"
+                                )
+                                break
+                        if company_country:
+                            break
+                if company_country:
+                    break
+
+        # Method 3: Search in visible text
+        if not company_country:
+            visible_text = soup.get_text()
+            for country in [
+                "Argentina",
+                "Brazil",
+                "Chile",
+                "Colombia",
+                "Mexico",
+                "Peru",
+                "United States",
+                "Canada",
+            ]:
+                if country in visible_text:
+                    company_country = country
+                    ctx.logger.info(f"   Found country in text: {country}")
+                    break
+
+        if not company_country:
+            company_country = "Unknown"
+            ctx.logger.warning("⚠️ Could not determine country - defaulting to Unknown")
 
         if driver:
             driver.quit()
             driver = None
 
-        if not unique_companies:
-            ctx.logger.warning("No companies found")
+        if not first_company:
+            ctx.logger.warning("❌ Could not extract company name")
             return {
-                "success": True,
+                "success": False,
                 "results": [],
                 "total_found": 0,
                 "search_url": search_url,
+                "error": "No company found",
             }
 
-        results = []
-        for idx, company_name in enumerate(unique_companies[:max_results]):
-            result = SupplierSearchResult(
-                company_name=company_name,
-                location="United States",
-                industry=category.title(),
-                b_corp_profile_url=f"https://www.bcorporation.net/en-us/find-a-b-corp/?query={category}",
-                description=f"B Corporation certified company specializing in {category}",
-            )
-            results.append(result)
+        ctx.logger.info(f"✅ Supplier: {first_company} from {company_country}")
+
+        result = SupplierSearchResult(
+            company_name=first_company,
+            location=company_country,  # COUNTRY for financial analysis
+            industry=category.title(),
+            b_corp_profile_url=profile_url or search_url,
+            description=f"B Corporation certified company specializing in {category}",
+        )
 
         return {
             "success": True,
-            "results": results,
-            "total_found": len(unique_companies),
+            "results": [result],
+            "total_found": 1,
             "search_url": search_url,
         }
 
@@ -359,6 +498,7 @@ def extract_business_category(user_query: str) -> str:
     user_query_lower = user_query.lower()
 
     categories = [
+        "water",
         "coffee",
         "tea",
         "food",

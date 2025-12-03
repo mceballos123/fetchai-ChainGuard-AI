@@ -55,7 +55,7 @@ class FinancialRAGSystem:
         # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
         Settings.embed_model = self.embed_model
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
-        
+
         print(f"Setting up Financial RAG System: {Settings.llm}")
         self.documents = []
         self.scraped_tariff_data = {}
@@ -65,10 +65,10 @@ class FinancialRAGSystem:
     ) -> Dict[str, str]:
         """
         Scrape Trade War Tracker for tariff and inflation data for a specific country.
-        
+
         Args:
             country: Country name to search for tariff/inflation data
-            
+
         Returns:
             Dictionary with scraped tariff and inflation data
         """
@@ -113,7 +113,7 @@ class FinancialRAGSystem:
                 text = item.get_text(strip=True)
                 if country.lower() in text.lower():
                     country_mentions.append(text[:500])
-            
+
             if country_mentions:
                 scraped_data["timeline_events"] = " ".join(country_mentions[:5])
 
@@ -131,9 +131,11 @@ class FinancialRAGSystem:
             tariff_paragraphs = []
             for p in paragraphs:
                 p_text = p.get_text(strip=True)
-                if country_lower in p_text.lower() and ("tariff" in p_text.lower() or "trade" in p_text.lower()):
+                if country_lower in p_text.lower() and (
+                    "tariff" in p_text.lower() or "trade" in p_text.lower()
+                ):
                     tariff_paragraphs.append(p_text[:300])
-            
+
             if tariff_paragraphs:
                 scraped_data["tariff_info"] = " ".join(tariff_paragraphs[:3])
 
@@ -328,15 +330,39 @@ class FinancialRAGSystem:
             # Step 3: Index the document in Pinecone
             await self._index_scraped_document(ctx, doc)
 
-            # Step 4: Query RAG system
+            # Step 4: Apply country-specific analysis to scraped data
+            country_analysis = analyze_country_financial_risk(
+                scraped_data, country, ctx
+            )
+
+            # Step 5: Query RAG system
             query = finance_prompt(supplier_name, industry, country)
 
             # Query using the indexed data
             rag_response = self.query_engine.query(query)
             response_text = str(rag_response)
 
-            # Step 5: Parse response and extract financial data
-            result = await self._parse_rag_response(ctx, response_text, supplier_name, country)
+            # Step 6: Parse response and merge with country-specific analysis
+            result = await self._parse_rag_response(
+                ctx, response_text, supplier_name, country
+            )
+
+            # Use country-specific score and risk factors if available
+            if country_analysis:
+                result["financial_score"] = country_analysis["financial_score"]
+                result["risk_factors"] = country_analysis["risk_factors"]
+
+                # Build country-specific financial details
+                is_us = "united states" in country.lower() or "usa" in country.lower()
+                if is_us:
+                    result["financial_details"] = (
+                        f"US domestic supplier analysis for {supplier_name}. Analyzed US inflation and economic conditions. No import tariffs apply to domestic suppliers."
+                    )
+                else:
+                    result["financial_details"] = (
+                        f"International tariff analysis for {supplier_name} from {country}. Trade data scraped from Trade War Tracker."
+                    )
+
             result["scraped_data"] = scraped_data
 
             return result
@@ -408,7 +434,8 @@ class FinancialRAGSystem:
 
             return {
                 "financial_score": float(financial_score),
-                "financial_details": financial_details or "No financial information available",
+                "financial_details": financial_details
+                or "No financial information available",
                 "risk_factors": risk_factors,
                 "retrieved_context": response_text,
             }
@@ -420,7 +447,9 @@ class FinancialRAGSystem:
             traceback.print_exc()
             return self._generate_fallback_response(supplier_name, country)
 
-    def _generate_fallback_response(self, supplier_name: str, country: str = "Unknown") -> Dict[str, Any]:
+    def _generate_fallback_response(
+        self, supplier_name: str, country: str = "Unknown"
+    ) -> Dict[str, Any]:
         """Generate fallback response when RAG is unavailable"""
         return {
             "financial_score": 50.0,  # Neutral score
@@ -523,7 +552,7 @@ def financial_check_node(
     try:
         supplier_name = state.get("supplier_name", "Unknown")
         supplier_country = state.get("supplier_country", "")
-        
+
         if not supplier_country:
             ctx.logger.error("No supplier country provided for tariff analysis")
             state["current_step"] = "financial_check_failed"
@@ -538,16 +567,22 @@ def financial_check_node(
             industry=state.get("industry", ""),
         )
 
-        # Update state with financial results
+        # Update state with financial results including risk_factors
         state["financial_score"] = rag_result.get("financial_score", 0.0)
         state["financial_info"] = rag_result.get("financial_details", "N/A")
+        state["risk_factors"] = rag_result.get("risk_factors", [])
         state["current_step"] = "financial_check_complete"
+
+        ctx.logger.info(f"Financial analysis complete for {supplier_country}")
+        ctx.logger.info(f"Score: {state['financial_score']}/100")
+        ctx.logger.info(f"Risk factors: {state['risk_factors']}")
 
         return state
 
     except Exception as e:
         ctx.logger.error(f"Error in financial check: {e}")
         import traceback
+
         traceback.print_exc()
 
         state["current_step"] = "financial_check_failed"
@@ -601,6 +636,151 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     state["should_continue"] = False
 
     return state
+
+
+# ============================================================================
+# COUNTRY-SPECIFIC ANALYSIS HELPERS
+# ============================================================================
+
+
+def analyze_country_financial_risk(
+    scraped_data: Dict[str, Any], country: str, ctx: Context
+) -> Dict[str, Any]:
+    """
+    Analyze financial risk based on country and scraped Trade War Tracker data.
+
+    Analysis varies by supplier country:
+    - US suppliers: Focus on US inflation and domestic trade conditions
+    - Latin American countries: Emerging market analysis with currency risk
+    - Other international: Standard tariff analysis
+    """
+    full_content = scraped_data.get("full_content", "").lower()
+    tariff_info = scraped_data.get("tariff_info", "").lower()
+    country_lower = country.lower() if country else ""
+
+    # Base score
+    score = 70.0
+    risk_factors = []
+
+    # Check if supplier is in the United States
+    is_us_supplier = (
+        "united states" in country_lower
+        or "usa" in country_lower
+        or "u.s." in country_lower
+    )
+
+    # Check if supplier is from Latin America
+    latin_american_countries = [
+        "argentina",
+        "brazil",
+        "chile",
+        "colombia",
+        "mexico",
+        "peru",
+        "uruguay",
+        "venezuela",
+        "ecuador",
+        "bolivia",
+        "paraguay",
+    ]
+    is_latin_american = any(c in country_lower for c in latin_american_countries)
+
+    if is_us_supplier:
+        # US Domestic Supplier Analysis
+        ctx.logger.info(f"📍 US Supplier - Analyzing US inflation and domestic trade")
+
+        score += 15.0  # No import tariff risk
+
+        if "inflation" in full_content:
+            if "high inflation" in full_content or "rising inflation" in full_content:
+                score -= 10.0
+                risk_factors.append("us_inflation_impact")
+            else:
+                score -= 5.0
+                risk_factors.append("us_inflation_impact")
+
+        if "recession" in full_content:
+            score -= 10.0
+            risk_factors.append("us_economic_conditions")
+
+        if "economic growth" in full_content:
+            score += 5.0
+
+        if not risk_factors:
+            risk_factors.append("domestic_supplier_low_risk")
+
+    elif is_latin_american:
+        # Latin American Supplier Analysis
+        ctx.logger.info(f"📍 {country} Supplier - Analyzing tariffs and inflation")
+
+        if country_lower in full_content:
+            if "tariff" in full_content:
+                score -= 10.0
+                risk_factors.append(f"{country.lower()}_tariff_exposure")
+            if "25%" in full_content or "25 percent" in full_content:
+                score -= 15.0
+
+        if "free trade" in full_content or "trade agreement" in full_content:
+            score += 10.0
+
+        if "inflation" in full_content:
+            score -= 10.0
+            risk_factors.append(f"{country.lower()}_inflation_impact")
+
+        if "currency" in full_content or "peso" in full_content:
+            score -= 5.0
+            risk_factors.append("currency_volatility")
+
+        if "argentina" in country_lower:
+            score -= 5.0
+            risk_factors.append("emerging_market_risk")
+
+        if "trade war" in full_content:
+            risk_factors.append("trade_war_risk")
+
+        if not risk_factors:
+            risk_factors.append(f"{country.lower()}_standard_trade")
+
+    else:
+        # Other International Supplier Analysis
+        ctx.logger.info(f"📍 International Supplier ({country}) - Analyzing tariffs")
+
+        if "145%" in full_content or "tariff war" in full_content:
+            score -= 35.0
+            risk_factors.append("extreme_tariff_exposure")
+
+        if "trade war" in full_content:
+            score -= 15.0
+            risk_factors.append("trade_war_risk")
+
+        if "duty-free" in full_content or "free trade" in full_content:
+            score += 15.0
+
+        if "sanctions" in full_content:
+            score -= 20.0
+            risk_factors.append("sanctions_risk")
+
+        if "inflation" in full_content:
+            score -= 5.0
+            risk_factors.append("inflation_impact")
+
+        if "tariff" in full_content:
+            risk_factors.append("tariff_exposure")
+
+        if "supply chain" in full_content:
+            risk_factors.append("supply_chain_disruption")
+
+        if not risk_factors:
+            risk_factors.append("standard_trade_exposure")
+
+    # Ensure score is within bounds
+    final_score = max(0.0, min(100.0, score))
+
+    return {
+        "financial_score": final_score,
+        "risk_factors": risk_factors,
+        "country_analyzed": country,
+    }
 
 
 # ============================================================================
