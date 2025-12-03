@@ -789,13 +789,17 @@ async def handle_find_supplier_response(
             ctx.logger.info(f"Agent Address: {FINANCIAL_AGENT_ADDRESS}")
             ctx.logger.info(f"Request ID: {msg.request_id}")
 
-            # Extract country from location (e.g., "San Francisco, USA" -> "USA")
-            supplier_country = best_supplier.location or "United States"
-            ctx.logger.info(f"Original Location: {best_supplier.location}")
+            # Get country from supplier location (already extracted by find_supplier_agent)
+            # Location field contains the country name from B Corp profile (e.g., "Argentina", "United States")
+            supplier_country = best_supplier.location or "Unknown"
+            ctx.logger.info(f"Supplier Location/Country: {supplier_country}")
+
+            # Handle cases where location might still be "City, Province, Country" format
             if "," in supplier_country:
-                # Extract country from "City, Country" format
-                supplier_country = supplier_country.split(",")[-1].strip()
-            ctx.logger.info(f"Extracted Country: {supplier_country}")
+                # Extract country from multi-part location string
+                parts = supplier_country.split(",")
+                supplier_country = parts[-1].strip()
+                ctx.logger.info(f"Extracted Country: {supplier_country}")
 
             financial_request = FinancialRequest(
                 request_id=msg.request_id,

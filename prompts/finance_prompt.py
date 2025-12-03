@@ -2,7 +2,7 @@ def finance_prompt(supplier_name, industry, country):
     return f"""
             YOUR TASK IS TO:
             Analyze the financial risk for supplier {supplier_name} operating in {country} within the {industry} industry.
-            Score from 0-100 based on tariffs and inflation data from Trade War Tracker:
+            Score from 0-100 based on tariffs and inflation data from Trade War Tracker, do the best you can to evualte the score with the information that is provided to you, since we're based in american when your're avualting the score of companies in america evualte them based on inflations and not tariffs:
             
             - 75 to 100: minimal financial risks (low tariffs, stable inflation)
             - 60 to 74: moderate risk (some tariffs, manageable inflation)
