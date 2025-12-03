@@ -167,6 +167,9 @@ async def search_b_corp_directory(
 
         # Try to find and click first company profile
         try:
+            # Use WebDriverWait for better control
+            wait = WebDriverWait(driver, 15)
+            
             company_links = driver.find_elements(
                 By.CSS_SELECTOR, 'a[href*="/find-a-b-corp/company/"]'
             )
@@ -179,6 +182,13 @@ async def search_b_corp_directory(
                 ctx.logger.info("🌐 Loaded company profile page")
         except Exception as e:
             ctx.logger.warning(f"Could not navigate to profile: {e}")
+            # Check if driver is still alive
+            try:
+                if not driver or driver.service.process is None:
+                    ctx.logger.error("Driver died while navigating, stopping")
+                    raise
+            except:
+                raise
 
         html_content = driver.page_source
         soup = BeautifulSoup(html_content, "html.parser")
@@ -284,10 +294,6 @@ async def search_b_corp_directory(
             company_country = "Unknown"
             ctx.logger.warning("⚠️ Could not determine country - defaulting to Unknown")
 
-        if driver:
-            driver.quit()
-            driver = None
-
         if not first_company:
             ctx.logger.warning("❌ Could not extract company name")
             return {
@@ -318,16 +324,18 @@ async def search_b_corp_directory(
     except Exception as e:
         ctx.logger.error(f"Error during search: {e}")
         import traceback
-
         traceback.print_exc()
 
+        return {"success": False, "results": [], "total_found": 0, "error": str(e)}
+    
+    finally:
+        # Always cleanup driver in finally block
         if driver:
             try:
                 driver.quit()
-            except:
-                pass
-
-        return {"success": False, "results": [], "total_found": 0, "error": str(e)}
+                ctx.logger.info("B Corp search WebDriver cleaned up")
+            except Exception as e:
+                ctx.logger.warning(f"Error closing driver: {e}")
 
 
 def find_supplier_node(state: SupplierSearchState) -> SupplierSearchState:

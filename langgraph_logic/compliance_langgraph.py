@@ -91,6 +91,11 @@ class ComplianceRAGSystem:
 
             driver = webdriver.Chrome(options=chrome_options)
             driver.set_page_load_timeout(30)
+
+            # Use WebDriverWait for better timeout control
+            wait = WebDriverWait(driver, 15)
+
+            ctx.logger.info(f"Loading page: {company_url}")
             driver.get(company_url)
             time.sleep(5)
 
@@ -118,9 +123,16 @@ class ComplianceRAGSystem:
 
             for tab in tabs:
                 try:
-                    # Try to find and click the tab button
-                    tab_button = driver.find_element(
-                        By.XPATH, f"//button[contains(text(), '{tab}')]"
+                    # Check if driver is still alive before continuing
+                    if not driver or driver.service.process is None:
+                        ctx.logger.warning(f"Driver died, stopping tab scraping")
+                        break
+
+                    # Try to find and click the tab button with timeout
+                    tab_button = wait.until(
+                        EC.presence_of_element_located(
+                            (By.XPATH, f"//button[contains(text(), '{tab}')]")
+                        )
                     )
                     driver.execute_script("arguments[0].click();", tab_button)
                     time.sleep(2)
@@ -135,10 +147,17 @@ class ComplianceRAGSystem:
                         scraped_data[tab.lower()] = tab_content[:2000]
 
                 except Exception as e:
-                    continue
-
-            if driver:
-                driver.quit()
+                    ctx.logger.warning(f"Could not scrape {tab} tab: {e}")
+                    # Don't continue if driver is dead
+                    try:
+                        if driver and driver.service.process:
+                            continue
+                        else:
+                            ctx.logger.error("Driver is dead, stopping scraping")
+                            break
+                    except:
+                        ctx.logger.error("Driver check failed, stopping scraping")
+                        break
 
             ctx.logger.info(f"Successfully scraped data for {supplier_name}")
             return scraped_data
@@ -149,17 +168,20 @@ class ComplianceRAGSystem:
 
             traceback.print_exc()
 
-            if driver:
-                try:
-                    driver.quit()
-                except:
-                    pass
-
             return {
                 "supplier_name": supplier_name,
                 "url": company_url,
                 "error": str(e),
             }
+
+        finally:
+            # Always cleanup driver in finally block
+            if driver:
+                try:
+                    driver.quit()
+                    ctx.logger.info("WebDriver cleaned up successfully")
+                except Exception as e:
+                    ctx.logger.warning(f"Error closing driver: {e}")
 
     async def initialize(self, ctx: Context) -> bool:
 

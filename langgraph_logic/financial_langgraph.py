@@ -33,11 +33,10 @@ PINECONE_INDEX_NAME_FINANCIAL = os.getenv(
     "PINECONE_INDEX_NAME_FINANCIAL", "financial-risk-index"
 )
 EMBEDDING_DIMENSION = 768
-TRADE_WAR_TRACKER_URL = "https://www.tradewartracker.com/"
 
 
 class FinancialRAGSystem:
-    """RAG system for financial risk analysis using Trade War Tracker tariff/inflation data"""
+    """RAG system for financial risk analysis using B Corp page data and country-based tariff/inflation analysis"""
 
     def __init__(self):
         self.initialized = False
@@ -60,21 +59,25 @@ class FinancialRAGSystem:
         self.documents = []
         self.scraped_tariff_data = {}
 
-    async def scrape_trade_war_tracker(
-        self, ctx: Context, country: str
+    async def scrape_bcorp_financial_page(
+        self, ctx: Context, supplier_name: str, b_corp_url: str, country: str
     ) -> Dict[str, str]:
         """
-        Scrape Trade War Tracker for tariff and inflation data for a specific country.
+        Scrape B Corp page for financial-relevant data.
 
         Args:
-            country: Country name to search for tariff/inflation data
+            supplier_name: Name of supplier
+            b_corp_url: B Corp profile URL
+            country: Country where supplier operates
 
         Returns:
-            Dictionary with scraped tariff and inflation data
+            Dictionary with scraped B Corp data relevant to financial analysis
         """
         driver = None
         try:
-            ctx.logger.info(f"Scraping Trade War Tracker for country: {country}")
+            ctx.logger.info(
+                f"Scraping B Corp page for financial analysis: {supplier_name}"
+            )
 
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
@@ -88,80 +91,86 @@ class FinancialRAGSystem:
 
             driver = webdriver.Chrome(options=chrome_options)
             driver.set_page_load_timeout(30)
-            driver.get(TRADE_WAR_TRACKER_URL)
+
+            ctx.logger.info(f"Loading B Corp page: {b_corp_url}")
+            driver.get(b_corp_url)
             time.sleep(5)
 
             scraped_data = {
+                "supplier_name": supplier_name,
                 "country": country,
-                "url": TRADE_WAR_TRACKER_URL,
-                "tariff_info": "",
-                "timeline_events": "",
-                "trade_data": "",
+                "url": b_corp_url,
+                "headquarters": "",
+                "size": "",
+                "sector": "",
+                "industry": "",
+                "overall_score": "",
                 "full_content": "",
             }
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
 
-            # Extract main content
+            # Extract main content for analysis
             main_content = soup.get_text(separator=" ", strip=True)
-            scraped_data["full_content"] = main_content[:5000]  # Limit to 5000 chars
+            scraped_data["full_content"] = main_content[:5000]
 
-            # Extract timeline events (country-specific mentions)
-            timeline_section = soup.find_all("li")
-            country_mentions = []
-            for item in timeline_section:
-                text = item.get_text(strip=True)
-                if country.lower() in text.lower():
-                    country_mentions.append(text[:500])
+            # Extract headquarters
+            hq_patterns = [r"Headquarters[:\s]+([^|]+)", r"Operates In[:\s]+([^|]+)"]
+            all_text = soup.get_text(separator="|", strip=True)
+            for pattern in hq_patterns:
+                match = re.search(pattern, all_text, re.IGNORECASE)
+                if match:
+                    scraped_data["headquarters"] = match.group(1).strip()
+                    break
 
-            if country_mentions:
-                scraped_data["timeline_events"] = " ".join(country_mentions[:5])
+            # Extract company size
+            size_match = re.search(
+                r"(\d+[-\s]+\d+)\s+employees", main_content, re.IGNORECASE
+            )
+            if size_match:
+                scraped_data["size"] = size_match.group(1)
 
-            # Extract tariff information from tables if available
-            tables = soup.find_all("table")
-            if tables:
-                table_text = []
-                for table in tables[:2]:  # Limit to first 2 tables
-                    table_text.append(table.get_text(separator=" ", strip=True)[:1000])
-                scraped_data["trade_data"] = " ".join(table_text)
+            # Extract sector and industry
+            sector_match = re.search(r"Sector[:\s]+([^\n|]+)", all_text, re.IGNORECASE)
+            if sector_match:
+                scraped_data["sector"] = sector_match.group(1).strip()
 
-            # Search for country-specific tariff mentions in the main content
-            country_lower = country.lower()
-            paragraphs = soup.find_all("p")
-            tariff_paragraphs = []
-            for p in paragraphs:
-                p_text = p.get_text(strip=True)
-                if country_lower in p_text.lower() and (
-                    "tariff" in p_text.lower() or "trade" in p_text.lower()
-                ):
-                    tariff_paragraphs.append(p_text[:300])
+            industry_match = re.search(
+                r"Industry[:\s]+([^\n|]+)", all_text, re.IGNORECASE
+            )
+            if industry_match:
+                scraped_data["industry"] = industry_match.group(1).strip()
 
-            if tariff_paragraphs:
-                scraped_data["tariff_info"] = " ".join(tariff_paragraphs[:3])
+            # Extract B Impact Score
+            score_element = soup.find("div", class_=re.compile(".*score.*", re.I))
+            if score_element:
+                score_text = score_element.get_text(strip=True)
+                scraped_data["overall_score"] = score_text
 
-            if driver:
-                driver.quit()
-
-            ctx.logger.info(f"Successfully scraped tariff data for {country}")
+            ctx.logger.info(f"Successfully scraped B Corp data for {supplier_name}")
             return scraped_data
 
         except Exception as e:
-            ctx.logger.error(f"Error scraping Trade War Tracker: {e}")
+            ctx.logger.error(f"Error scraping B Corp page: {e}")
             import traceback
 
             traceback.print_exc()
 
+            return {
+                "supplier_name": supplier_name,
+                "country": country,
+                "url": b_corp_url,
+                "error": str(e),
+            }
+
+        finally:
+            # Always cleanup driver in finally block
             if driver:
                 try:
                     driver.quit()
-                except:
-                    pass
-
-            return {
-                "country": country,
-                "url": TRADE_WAR_TRACKER_URL,
-                "error": str(e),
-            }
+                    ctx.logger.info("B Corp financial scraping WebDriver cleaned up")
+                except Exception as e:
+                    ctx.logger.warning(f"Error closing driver: {e}")
 
     async def initialize(self, ctx: Context) -> bool:
         try:
@@ -261,16 +270,17 @@ class FinancialRAGSystem:
         supplier_name: str,
         country: str,
         industry: str,
+        b_corp_url: str = "",
     ) -> Dict[str, Any]:
         """
-        Query RAG system for country tariff/inflation information using Trade War Tracker.
+        Query RAG system for financial risk analysis using B Corp data and country-based analysis.
 
         Process:
-        1. Scrape Trade War Tracker for country tariff/inflation data
-        2. Convert scraped data to Document and create embeddings
-        3. Store embeddings in Pinecone
-        4. Query RAG system for financial risk analysis
-        5. Use LLM to analyze tariffs and inflation impact
+        1. Scrape B Corp page for supplier data
+        2. Apply country-specific financial risk analysis based on US trade relationships
+        3. Convert data to Document and create embeddings
+        4. Store embeddings in Pinecone
+        5. Query RAG system for financial risk analysis
         6. Return structured financial data
 
         Returns:
@@ -286,31 +296,57 @@ class FinancialRAGSystem:
             return self._generate_fallback_response(supplier_name, country)
 
         try:
-            # Step 1: Scrape Trade War Tracker for country data
+            # Step 1: Validate inputs
             if not country:
-                ctx.logger.error("No country provided for tariff analysis")
+                ctx.logger.error("No country provided for financial analysis")
                 return self._generate_fallback_response(supplier_name, country)
 
-            scraped_data = await self.scrape_trade_war_tracker(ctx, country)
+            if not b_corp_url:
+                ctx.logger.warning(
+                    "No B Corp URL provided, using country-based analysis only"
+                )
+                scraped_data = {
+                    "supplier_name": supplier_name,
+                    "country": country,
+                    "url": "",
+                    "full_content": f"Supplier {supplier_name} operates in {country}. Industry: {industry}.",
+                }
+            else:
+                # Scrape B Corp page for additional context
+                scraped_data = await self.scrape_bcorp_financial_page(
+                    ctx, supplier_name, b_corp_url, country
+                )
 
-            if "error" in scraped_data:
-                ctx.logger.warning("Scraping failed, using fallback")
-                return self._generate_fallback_response(supplier_name, country)
+                if "error" in scraped_data:
+                    ctx.logger.warning(
+                        "B Corp scraping failed, using country-based analysis only"
+                    )
+                    scraped_data["full_content"] = (
+                        f"Supplier {supplier_name} operates in {country}. Industry: {industry}."
+                    )
 
-            # Step 2: Convert scraped data to LlamaIndex Document
-            tariff_text = f"""
+            # Step 2: Apply country-specific financial risk analysis
+            country_analysis = analyze_country_financial_risk(
+                scraped_data, country, ctx
+            )
+
+            # Step 3: Convert scraped data to LlamaIndex Document
+            financial_text = f"""
             Supplier: {supplier_name}
             Operating Country: {country}
             Industry: {industry}
             
-            TARIFF INFORMATION:
-            {scraped_data.get('tariff_info', 'No specific tariff data')}
+            B CORP INFORMATION:
+            Headquarters: {scraped_data.get('headquarters', country)}
+            Sector: {scraped_data.get('sector', 'Unknown')}
+            Industry: {scraped_data.get('industry', industry)}
+            Size: {scraped_data.get('size', 'Unknown')}
+            B Impact Score: {scraped_data.get('overall_score', 'Unknown')}
             
-            TIMELINE EVENTS:
-            {scraped_data.get('timeline_events', 'No timeline events')}
-            
-            TRADE DATA:
-            {scraped_data.get('trade_data', 'No trade data')}
+            FINANCIAL RISK ANALYSIS:
+            Based on US trade relationship with {country}:
+            Financial Score: {country_analysis['financial_score']}/100
+            Risk Factors: {', '.join(country_analysis['risk_factors'])}
             
             FULL CONTEXT:
             {scraped_data.get('full_content', 'No additional context')[:3000]}
@@ -318,22 +354,17 @@ class FinancialRAGSystem:
 
             # Create Document object
             doc = Document(
-                text=tariff_text,
+                text=financial_text,
                 metadata={
                     "supplier_name": supplier_name,
                     "country": country,
-                    "source": "trade_war_tracker",
-                    "url": TRADE_WAR_TRACKER_URL,
+                    "source": "bcorp_financial_analysis",
+                    "url": b_corp_url or "",
                 },
             )
 
-            # Step 3: Index the document in Pinecone
+            # Step 4: Index the document in Pinecone
             await self._index_scraped_document(ctx, doc)
-
-            # Step 4: Apply country-specific analysis to scraped data
-            country_analysis = analyze_country_financial_risk(
-                scraped_data, country, ctx
-            )
 
             # Step 5: Query RAG system
             query = finance_prompt(supplier_name, industry, country)
@@ -347,21 +378,23 @@ class FinancialRAGSystem:
                 ctx, response_text, supplier_name, country
             )
 
-            # Use country-specific score and risk factors if available
-            if country_analysis:
-                result["financial_score"] = country_analysis["financial_score"]
-                result["risk_factors"] = country_analysis["risk_factors"]
+            # Use country-specific score and risk factors
+            result["financial_score"] = country_analysis["financial_score"]
+            result["risk_factors"] = country_analysis["risk_factors"]
 
-                # Build country-specific financial details
-                is_us = "united states" in country.lower() or "usa" in country.lower()
-                if is_us:
-                    result["financial_details"] = (
-                        f"US domestic supplier analysis for {supplier_name}. Analyzed US inflation and economic conditions. No import tariffs apply to domestic suppliers."
-                    )
-                else:
-                    result["financial_details"] = (
-                        f"International tariff analysis for {supplier_name} from {country}. Trade data scraped from Trade War Tracker."
-                    )
+            # Build country-specific financial details
+            is_us = "united states" in country.lower() or "usa" in country.lower()
+            if is_us:
+                result["financial_details"] = (
+                    f"US domestic supplier analysis for {supplier_name}. No import tariffs apply. "
+                    f"Analysis based on US economic conditions and B Corp certification standards."
+                )
+            else:
+                result["financial_details"] = (
+                    f"International supplier analysis for {supplier_name} from {country}. "
+                    f"Financial risk evaluated based on US-{country} trade relationship and B Corp data. "
+                    f"Score: {country_analysis['financial_score']}/100."
+                )
 
             result["scraped_data"] = scraped_data
 
@@ -463,6 +496,7 @@ class FinancialRAGSystem:
         supplier_name: str,
         country: str,
         industry: str,
+        b_corp_url: str = "",
     ) -> Dict[str, Any]:
         """Synchronous wrapper for query_financial_documents for use in LangGraph nodes"""
         import asyncio
@@ -507,6 +541,7 @@ class FinancialRAGSystem:
                                 supplier_name=supplier_name,
                                 country=country,
                                 industry=industry,
+                                b_corp_url=b_corp_url,
                             )
                         )
                     finally:
@@ -524,6 +559,7 @@ class FinancialRAGSystem:
                         supplier_name=supplier_name,
                         country=country,
                         industry=industry,
+                        b_corp_url=b_corp_url,
                     )
                 )
                 return result
@@ -538,33 +574,36 @@ def financial_check_node(
     state: SupplierWorkflowState, rag_system: FinancialRAGSystem, ctx: Context
 ) -> SupplierWorkflowState:
     """
-    Node 1: Run financial risk check on country using Trade War Tracker.
+    Node 1: Run financial risk check using B Corp data and country-based trade analysis.
 
     Process:
-    1. Get supplier country from state
-    2. Scrape Trade War Tracker for tariff/inflation data
-    3. Store in Pinecone and analyze with RAG
-    4. Return financial score and details
+    1. Get supplier country and B Corp URL from state
+    2. Scrape B Corp page for supplier data
+    3. Apply country-specific financial risk analysis based on US trade relationships
+    4. Store in Pinecone and analyze with RAG
+    5. Return financial score and details
 
-    Input: supplier_name, supplier_country, industry
+    Input: supplier_name, supplier_country, industry, b_corp_profile_url
     Output: financial_score, financial_info, risk_factors
     """
     try:
         supplier_name = state.get("supplier_name", "Unknown")
         supplier_country = state.get("supplier_country", "")
+        b_corp_url = state.get("b_corp_profile_url", "")
 
         if not supplier_country:
-            ctx.logger.error("No supplier country provided for tariff analysis")
+            ctx.logger.error("No supplier country provided for financial analysis")
             state["current_step"] = "financial_check_failed"
             state["error_message"] = "No country information available"
             state["financial_score"] = 0.0
             return state
 
-        # Run RAG query for financial analysis (includes scraping Trade War Tracker)
+        # Run RAG query for financial analysis (includes B Corp scraping and country analysis)
         rag_result = rag_system.query_financial_documents_sync(
             supplier_name=supplier_name,
             country=supplier_country,
             industry=state.get("industry", ""),
+            b_corp_url=b_corp_url,
         )
 
         # Update state with financial results including risk_factors
@@ -647,16 +686,18 @@ def analyze_country_financial_risk(
     scraped_data: Dict[str, Any], country: str, ctx: Context
 ) -> Dict[str, Any]:
     """
-    Analyze financial risk based on country and scraped Trade War Tracker data.
+    Analyze financial risk based on country and US trade relationships.
 
-    Analysis varies by supplier country:
-    - US suppliers: Focus on US inflation and domestic trade conditions
-    - Latin American countries: Emerging market analysis with currency risk
-    - Other international: Standard tariff analysis
+    Analysis uses known trade facts and relationships between US and supplier countries:
+    - US suppliers: No import tariffs, domestic economy focus
+    - Countries with free trade agreements: Lower tariff risk
+    - EU countries: Generally favorable trade, but potential VAT considerations
+    - Latin American countries: Emerging market risks, currency volatility
+    - China: High tariff risk due to ongoing trade tensions
+    - Other international: Standard international trade analysis
     """
-    full_content = scraped_data.get("full_content", "").lower()
-    tariff_info = scraped_data.get("tariff_info", "").lower()
     country_lower = country.lower() if country else ""
+    full_content = scraped_data.get("full_content", "").lower()
 
     # Base score
     score = 70.0
@@ -669,7 +710,12 @@ def analyze_country_financial_risk(
         or "u.s." in country_lower
     )
 
-    # Check if supplier is from Latin America
+    # Define trade relationship categories
+
+    # Countries with US Free Trade Agreements (lower tariff risk)
+    usmca_countries = ["mexico", "canada"]  # USMCA (formerly NAFTA)
+
+    # Latin American countries (emerging market risks)
     latin_american_countries = [
         "argentina",
         "brazil",
@@ -683,95 +729,128 @@ def analyze_country_financial_risk(
         "bolivia",
         "paraguay",
     ]
+
+    # EU countries (generally favorable trade)
+    eu_countries = [
+        "spain",
+        "germany",
+        "france",
+        "italy",
+        "netherlands",
+        "belgium",
+        "portugal",
+        "greece",
+        "ireland",
+        "austria",
+        "poland",
+        "sweden",
+        "denmark",
+        "finland",
+        "czech republic",
+        "hungary",
+        "romania",
+    ]
+
+    # High tariff risk countries
+    high_tariff_countries = ["china", "russia"]
+
     is_latin_american = any(c in country_lower for c in latin_american_countries)
+    is_usmca = any(c in country_lower for c in usmca_countries)
+    is_eu = any(c in country_lower for c in eu_countries)
+    is_high_tariff = any(c in country_lower for c in high_tariff_countries)
 
     if is_us_supplier:
         # US Domestic Supplier Analysis
-        ctx.logger.info(f"📍 US Supplier - Analyzing US inflation and domestic trade")
+        ctx.logger.info(
+            f"📍 US Supplier - No import tariffs, domestic economic analysis"
+        )
 
-        score += 15.0  # No import tariff risk
+        score += 20.0  # No import tariff risk - major advantage
+        risk_factors.append("domestic_supplier_no_tariffs")
 
-        if "inflation" in full_content:
-            if "high inflation" in full_content or "rising inflation" in full_content:
-                score -= 10.0
-                risk_factors.append("us_inflation_impact")
-            else:
-                score -= 5.0
-                risk_factors.append("us_inflation_impact")
+        # US suppliers only face domestic economic considerations
+        # Note: Actual inflation data would require real-time economic APIs
+        # For B Corp certified companies, assume stable operations
 
-        if "recession" in full_content:
-            score -= 10.0
-            risk_factors.append("us_economic_conditions")
+    elif is_high_tariff:
+        # High Tariff Countries (China, Russia, etc.)
+        ctx.logger.info(f"📍 {country} Supplier - High tariff environment")
 
-        if "economic growth" in full_content:
+        if "china" in country_lower:
+            score -= 30.0  # Significant tariff exposure with China
+            risk_factors.append("china_tariff_risk")
+            risk_factors.append("trade_tension_impact")
+        elif "russia" in country_lower:
+            score -= 40.0  # Sanctions and trade restrictions
+            risk_factors.append("sanctions_risk")
+            risk_factors.append("supply_chain_instability")
+
+    elif is_usmca:
+        # USMCA Countries (Mexico, Canada) - Free Trade Agreement
+        ctx.logger.info(f"📍 {country} Supplier - USMCA free trade partner")
+
+        score += 15.0  # USMCA benefits
+        risk_factors.append("usmca_free_trade")
+
+        if "mexico" in country_lower:
+            # Mexico: Strong trade partner, minimal tariffs
+            risk_factors.append("favorable_trade_agreement")
+        elif "canada" in country_lower:
+            # Canada: Strong trade partner, stable economy
+            risk_factors.append("stable_trade_partner")
+
+    elif is_eu:
+        # European Union Countries
+        ctx.logger.info(f"📍 {country} (EU) Supplier - European trade analysis")
+
+        score += 5.0  # Generally favorable trade with EU
+        risk_factors.append("eu_trade_relationship")
+
+        # Some EU products face lower tariffs
+        # Spain, Germany, France are major trading partners
+        if any(c in country_lower for c in ["spain", "germany", "france", "italy"]):
             score += 5.0
-
-        if not risk_factors:
-            risk_factors.append("domestic_supplier_low_risk")
+            risk_factors.append("major_eu_trading_partner")
 
     elif is_latin_american:
-        # Latin American Supplier Analysis
-        ctx.logger.info(f"📍 {country} Supplier - Analyzing tariffs and inflation")
+        # Latin American Countries (non-USMCA)
+        ctx.logger.info(f"📍 {country} Supplier - Latin American emerging market")
 
-        if country_lower in full_content:
-            if "tariff" in full_content:
-                score -= 10.0
-                risk_factors.append(f"{country.lower()}_tariff_exposure")
-            if "25%" in full_content or "25 percent" in full_content:
-                score -= 15.0
+        # Moderate tariff risk, currency volatility
+        score -= 10.0
+        risk_factors.append("emerging_market_risk")
+        risk_factors.append("currency_volatility")
 
-        if "free trade" in full_content or "trade agreement" in full_content:
-            score += 10.0
-
-        if "inflation" in full_content:
-            score -= 10.0
-            risk_factors.append(f"{country.lower()}_inflation_impact")
-
-        if "currency" in full_content or "peso" in full_content:
-            score -= 5.0
-            risk_factors.append("currency_volatility")
-
+        # Argentina has specific economic challenges
         if "argentina" in country_lower:
             score -= 5.0
-            risk_factors.append("emerging_market_risk")
+            risk_factors.append("argentina_economic_volatility")
 
-        if "trade war" in full_content:
-            risk_factors.append("trade_war_risk")
-
-        if not risk_factors:
-            risk_factors.append(f"{country.lower()}_standard_trade")
+        # Chile and Peru have trade agreements
+        if any(c in country_lower for c in ["chile", "peru"]):
+            score += 8.0
+            risk_factors.append("trade_agreement_benefits")
 
     else:
-        # Other International Supplier Analysis
-        ctx.logger.info(f"📍 International Supplier ({country}) - Analyzing tariffs")
+        # Other International Countries
+        ctx.logger.info(f"📍 {country} Supplier - Standard international trade")
 
-        if "145%" in full_content or "tariff war" in full_content:
-            score -= 35.0
-            risk_factors.append("extreme_tariff_exposure")
+        # Apply standard international tariff considerations
+        score -= 5.0  # Base international tariff risk
+        risk_factors.append("standard_international_tariffs")
 
-        if "trade war" in full_content:
-            score -= 15.0
-            risk_factors.append("trade_war_risk")
+        # Asia-Pacific (excluding China)
+        if any(
+            c in country_lower
+            for c in ["japan", "south korea", "singapore", "australia"]
+        ):
+            score += 10.0
+            risk_factors.append("developed_economy_partner")
 
-        if "duty-free" in full_content or "free trade" in full_content:
-            score += 15.0
-
-        if "sanctions" in full_content:
-            score -= 20.0
-            risk_factors.append("sanctions_risk")
-
-        if "inflation" in full_content:
+        # India
+        if "india" in country_lower:
             score -= 5.0
-            risk_factors.append("inflation_impact")
-
-        if "tariff" in full_content:
-            risk_factors.append("tariff_exposure")
-
-        if "supply chain" in full_content:
-            risk_factors.append("supply_chain_disruption")
-
-        if not risk_factors:
-            risk_factors.append("standard_trade_exposure")
+            risk_factors.append("developing_market_considerations")
 
     # Ensure score is within bounds
     final_score = max(0.0, min(100.0, score))
@@ -797,7 +876,7 @@ def build_financial_workflow(
     Flow:
     START
         ↓
-    financial_check_node (Scrape Trade War Tracker + Run RAG analysis)
+    financial_check_node (Scrape B Corp + Apply country-based trade analysis + Run RAG)
         ↓
     financial_router (Check score >= 60)
         ├─→ success_node (Score >= 60) → END
