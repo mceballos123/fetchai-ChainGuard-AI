@@ -688,19 +688,20 @@ def analyze_country_financial_risk(
     """
     Analyze financial risk based on country and US trade relationships.
 
-    Analysis uses known trade facts and relationships between US and supplier countries:
-    - US suppliers: No import tariffs, domestic economy focus
-    - Countries with free trade agreements: Lower tariff risk
-    - EU countries: Generally favorable trade, but potential VAT considerations
-    - Latin American countries: Emerging market risks, currency volatility
-    - China: High tariff risk due to ongoing trade tensions
-    - Other international: Standard international trade analysis
+    Follows finance_prompt scoring guidance:
+    - 75-100: minimal financial risks (low tariffs, stable inflation)
+    - 60-74: moderate risk (some tariffs, manageable inflation)
+    - 40-59: significant risk (high tariffs or inflation concerns)
+    - Below 40: high risk (severe tariffs, economic instability)
+
+    Be fair in evaluation - don't be overly harsh on countries with some trade restrictions.
+    Consider: tariff rates, trade agreements, currency stability, US relationship
     """
     country_lower = country.lower() if country else ""
     full_content = scraped_data.get("full_content", "").lower()
 
-    # Base score
-    score = 70.0
+    # Start with moderate baseline score (per prompt guidance)
+    score = 65.0  # Start in moderate range
     risk_factors = []
 
     # Check if supplier is in the United States
@@ -761,96 +762,103 @@ def analyze_country_financial_risk(
 
     if is_us_supplier:
         # US Domestic Supplier Analysis
+        # Score: 85-95 (minimal financial risks per prompt)
         ctx.logger.info(
             f"📍 US Supplier - No import tariffs, domestic economic analysis"
         )
 
-        score += 20.0  # No import tariff risk - major advantage
-        risk_factors.append("domestic_supplier_no_tariffs")
+        score = 88.0  # Minimal risk range (75-100)
+        risk_factors.append("no_import_tariffs")
+        risk_factors.append("domestic_supply_chain")
 
-        # US suppliers only face domestic economic considerations
-        # Note: Actual inflation data would require real-time economic APIs
-        # For B Corp certified companies, assume stable operations
+        # US suppliers - no tariff concerns, only domestic economic factors
+        # B Corp certification indicates stable operations
 
     elif is_high_tariff:
         # High Tariff Countries (China, Russia, etc.)
-        ctx.logger.info(f"📍 {country} Supplier - High tariff environment")
+        # Score: 40-55 (significant to high risk per prompt)
+        ctx.logger.info(f"📍 {country} Supplier - Elevated tariff environment")
 
         if "china" in country_lower:
-            score -= 30.0  # Significant tariff exposure with China
-            risk_factors.append("china_tariff_risk")
-            risk_factors.append("trade_tension_impact")
+            score = 48.0  # Significant risk range (40-59)
+            risk_factors.append("higher_us_tariffs_applicable")
+            risk_factors.append("trade_relationship_considerations")
+            # Note: Being fair per prompt - not subtracting 40 points
         elif "russia" in country_lower:
-            score -= 40.0  # Sanctions and trade restrictions
-            risk_factors.append("sanctions_risk")
-            risk_factors.append("supply_chain_instability")
+            score = 35.0  # High risk (below 40) due to sanctions
+            risk_factors.append("international_sanctions")
+            risk_factors.append("supply_chain_complexity")
 
     elif is_usmca:
         # USMCA Countries (Mexico, Canada) - Free Trade Agreement
+        # Score: 80-90 (minimal financial risks per prompt)
         ctx.logger.info(f"📍 {country} Supplier - USMCA free trade partner")
 
-        score += 15.0  # USMCA benefits
-        risk_factors.append("usmca_free_trade")
+        score = 82.0  # Minimal risk range (75-100)
+        risk_factors.append("usmca_free_trade_agreement")
+        risk_factors.append("low_to_no_tariffs")
 
         if "mexico" in country_lower:
-            # Mexico: Strong trade partner, minimal tariffs
-            risk_factors.append("favorable_trade_agreement")
+            risk_factors.append("strong_trade_partner")
         elif "canada" in country_lower:
-            # Canada: Strong trade partner, stable economy
-            risk_factors.append("stable_trade_partner")
+            risk_factors.append("stable_economic_partner")
 
     elif is_eu:
         # European Union Countries
+        # Score: 70-80 (minimal to moderate risk per prompt)
         ctx.logger.info(f"📍 {country} (EU) Supplier - European trade analysis")
 
-        score += 5.0  # Generally favorable trade with EU
+        score = 72.0  # Moderate to minimal range (60-74 / 75-100)
         risk_factors.append("eu_trade_relationship")
+        risk_factors.append("standard_import_duties")
 
-        # Some EU products face lower tariffs
-        # Spain, Germany, France are major trading partners
+        # Major EU trading partners
         if any(c in country_lower for c in ["spain", "germany", "france", "italy"]):
-            score += 5.0
-            risk_factors.append("major_eu_trading_partner")
+            score = 76.0  # Bump to minimal risk
+            risk_factors.append("major_trading_partner")
 
     elif is_latin_american:
         # Latin American Countries (non-USMCA)
+        # Score: 55-70 (moderate to significant risk per prompt)
         ctx.logger.info(f"📍 {country} Supplier - Latin American emerging market")
 
-        # Moderate tariff risk, currency volatility
-        score -= 10.0
-        risk_factors.append("emerging_market_risk")
-        risk_factors.append("currency_volatility")
+        score = 62.0  # Moderate risk range (60-74)
+        risk_factors.append("emerging_market_considerations")
+        risk_factors.append("currency_exchange_factors")
 
-        # Argentina has specific economic challenges
+        # Argentina has economic volatility
         if "argentina" in country_lower:
-            score -= 5.0
-            risk_factors.append("argentina_economic_volatility")
+            score = 58.0  # Still moderate, not overly harsh
+            risk_factors.append("economic_volatility_factors")
 
-        # Chile and Peru have trade agreements
+        # Chile and Peru have favorable trade agreements
         if any(c in country_lower for c in ["chile", "peru"]):
-            score += 8.0
-            risk_factors.append("trade_agreement_benefits")
+            score = 68.0  # Better moderate score
+            risk_factors.append("bilateral_trade_agreement")
 
     else:
         # Other International Countries
+        # Score: 60-70 (moderate risk per prompt)
         ctx.logger.info(f"📍 {country} Supplier - Standard international trade")
 
-        # Apply standard international tariff considerations
-        score -= 5.0  # Base international tariff risk
+        score = 64.0  # Moderate risk range (60-74)
         risk_factors.append("standard_international_tariffs")
+        risk_factors.append("import_duty_applicable")
 
-        # Asia-Pacific (excluding China)
+        # Asia-Pacific developed economies (excluding China)
         if any(
             c in country_lower
             for c in ["japan", "south korea", "singapore", "australia"]
         ):
-            score += 10.0
-            risk_factors.append("developed_economy_partner")
+            score = 74.0  # Upper moderate range
+            risk_factors.append("developed_economy")
+            risk_factors.append("stable_trade_relations")
 
-        # India
+        # India - developing market
         if "india" in country_lower:
-            score -= 5.0
-            risk_factors.append("developing_market_considerations")
+            score = 60.0  # Lower moderate range
+            risk_factors.append("developing_market")
+            risk_factors.append("tariff_considerations")
 
     # Ensure score is within bounds
     final_score = max(0.0, min(100.0, score))

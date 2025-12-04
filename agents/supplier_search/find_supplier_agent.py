@@ -169,7 +169,7 @@ async def search_b_corp_directory(
         try:
             # Use WebDriverWait for better control
             wait = WebDriverWait(driver, 15)
-            
+
             company_links = driver.find_elements(
                 By.CSS_SELECTOR, 'a[href*="/find-a-b-corp/company/"]'
             )
@@ -324,10 +324,11 @@ async def search_b_corp_directory(
     except Exception as e:
         ctx.logger.error(f"Error during search: {e}")
         import traceback
+
         traceback.print_exc()
 
         return {"success": False, "results": [], "total_found": 0, "error": str(e)}
-    
+
     finally:
         # Always cleanup driver in finally block
         if driver:
