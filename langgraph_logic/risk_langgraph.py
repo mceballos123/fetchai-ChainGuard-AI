@@ -80,10 +80,10 @@ class RiskRAGSystem:
 
             driver = webdriver.Chrome(options=chrome_options)
             driver.set_page_load_timeout(30)
-            
+
             # Use WebDriverWait for better timeout control
             wait = WebDriverWait(driver, 15)
-            
+
             ctx.logger.info(f"Loading page: {company_url}")
             driver.get(company_url)
             time.sleep(5)
@@ -116,10 +116,12 @@ class RiskRAGSystem:
                     if not driver or driver.service.process is None:
                         ctx.logger.warning(f"Driver died, stopping tab scraping")
                         break
-                    
+
                     # Try to find and click the tab button with timeout
                     tab_button = wait.until(
-                        EC.presence_of_element_located((By.XPATH, f"//button[contains(text(), '{tab}')]"))
+                        EC.presence_of_element_located(
+                            (By.XPATH, f"//button[contains(text(), '{tab}')]")
+                        )
                     )
                     driver.execute_script("arguments[0].click();", tab_button)
                     time.sleep(2)
@@ -149,6 +151,7 @@ class RiskRAGSystem:
         except Exception as e:
             ctx.logger.error(f"Error scraping B Corp page: {e}")
             import traceback
+
             traceback.print_exc()
 
             return {
@@ -156,7 +159,7 @@ class RiskRAGSystem:
                 "url": company_url,
                 "error": str(e),
             }
-        
+
         finally:
             # Always cleanup driver in finally block
             if driver:

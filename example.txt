@@ -1,0 +1,16 @@
+ollama run llama3.2:1b "hello"
+pkill ollama         # stop any running Ollama process
+ollama serve         # start again cleanly
+lsof -i :11434
+llm = Ollama(model="llama3.2:1b", base_url="http://127.0.0.1:11434/", request_timeout=300) 
+ollama list
+
+http://127.0.0.1:11434/api/tags
+
+{"models":[{"name":"nomic-embed-text:latest","model":"nomic-embed-text:latest","modified_at":"2025-10-16T17:36:56.242826405-07:00","size":274302450,"digest":"0a109f422b47e3a30ba2b10eca18548e944e8a23073ee3f3e947efcf3c45e59f","details":{"parent_model":"","format":"gguf","family":"nomic-bert","families":["nomic-bert"],"parameter_size":"137M","quantization_level":"F16"}},{"name":"llama3.2:1b","model":"llama3.2:1b","modified_at":"2025-10-16T17:36:19.695307018-07:00","size":1321098329,"digest":"baf6a787fdffd633537aa2eb51cfd54cb93ff08e28040095462bb63daf552878","details":{"parent_model":"","format":"gguf","family":"llama","families":["llama"],"parameter_size":"1.2B","quantization_level":"Q8_0"}},{"name":"llama3.2:latest","model":"llama3.2:latest","modified_at":"2025-06-12T13:57:39.180978051-07:00","size":2019393189,"digest":"a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72","details":{"parent_model":"","format":"gguf","family":"llama","families":["llama"],"parameter_size":"3.2B","quantization_level":"Q4_K_M"}}]}
+ry — 11/12/25, 11:37 PM
+from ollama import Client
+
+client = Client(host="http://127.0.0.1:11434")
+resp = client.generate(model="llama3.2:1b", prompt="Say hello from Ollama")
+print(resp['response'])
