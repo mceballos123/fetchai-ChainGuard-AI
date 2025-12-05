@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 from typing import Dict, List, Any
+from supabase import create_client, Client
 
 # backend/agents/supplier_search
 # Import chat protocol components
@@ -34,6 +35,10 @@ from test_func.orchestrator_helpers import (
 load_dotenv()
 
 SUPPLIER_ORCHESTRATOR_SEED = os.getenv("SUPPLIER_ORCHESTRATOR_SEED")
+
+# Supabase configuration for monitoring data storage
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supplier_orchestrator = Agent(
     name="supplier_orchestrator",
@@ -83,6 +88,21 @@ async def startup(ctx: Context):
     ctx.logger.info(f"Performance Agent: {PERFORMANCE_AGENT_ADDRESS}")
     ctx.logger.info(f"Demand Agent: {DEMAND_AGENT_ADDRESS}")
     ctx.logger.info(f"Logistics Agent: {LOGISTICS_AGENT_ADDRESS}")
+
+    # Initialize Supabase client for monitoring data storage
+    if SUPABASE_URL and SUPABASE_KEY:
+        try:
+            supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+            ctx.storage.set("supabase_client", supabase_client)
+            ctx.logger.info("✅ Supabase client initialized successfully")
+        except Exception as e:
+            ctx.logger.error(f"❌ Failed to initialize Supabase client: {e}")
+            ctx.storage.set("supabase_client", None)
+    else:
+        ctx.logger.warning(
+            "⚠️ Supabase credentials not found - monitoring data will not be stored"
+        )
+        ctx.storage.set("supabase_client", None)
 
     ctx.storage.set("active_sessions", {})
     ctx.storage.set("approved_suppliers", [])
@@ -582,8 +602,69 @@ async def handle_compliance_response(
         ctx.logger.info(f"Supplier: {msg.supplier_name}")
         ctx.logger.info(f"Score: {msg.compliance_score}/100")
 
-        # Check if we have all three responses now
-        await check_and_send_combined_response(ctx, msg.request_id)
+        # SEQUENTIAL: Now trigger Financial Agent (Step 2/3)
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("✅ COMPLIANCE COMPLETE - MOVING TO STEP 2: FINANCIAL")
+        ctx.logger.info("=" * 70)
+
+        # Get supplier info from stored data
+        best_supplier_data = pending_responses[msg.request_id].get("best_supplier")
+        user_query = pending_responses[msg.request_id].get("user_query")
+
+        if not best_supplier_data:
+            ctx.logger.error(
+                "No supplier data found, cannot proceed to financial agent"
+            )
+            return
+
+        # Send to Financial Agent
+        ctx.logger.info("📤 [STEP 2/3] SENDING TO FINANCIAL AGENT")
+        ctx.logger.info(f"Agent Address: {FINANCIAL_AGENT_ADDRESS}")
+        ctx.logger.info(f"Request ID: {msg.request_id}")
+
+        # Financial agent will scrape B Corp URL to extract country
+        b_corp_url = best_supplier_data.get("b_corp_profile_url", "")
+        ctx.logger.info(f"B Corp URL (will be scraped for country): {b_corp_url}")
+
+        financial_request = FinancialRequest(
+            request_id=msg.request_id,
+            supplier_name=best_supplier_data.get("company_name"),
+            industry=best_supplier_data.get("industry", "general"),
+            b_corp_profile_url=b_corp_url,
+            timestamp="",
+        )
+
+        ctx.logger.info(f"Financial Request Details:")
+        ctx.logger.info(f"  - Supplier: {financial_request.supplier_name}")
+        ctx.logger.info(f"  - B Corp URL: {financial_request.b_corp_profile_url}")
+        ctx.logger.info(f"  - Industry: {financial_request.industry}")
+        ctx.logger.info(f"  - Country will be scraped from B Corp page")
+
+        await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
+
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "FinancialRequest",
+            msg.request_id,
+            {
+                "supplier_name": financial_request.supplier_name,
+                "b_corp_profile_url": financial_request.b_corp_profile_url,
+                "industry": financial_request.industry,
+            },
+        )
+
+        ctx.logger.info(f"✅ FinancialRequest successfully sent to Financial Agent")
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("⏳ WAITING FOR FINANCIAL RESPONSE...")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("Progress:")
+        ctx.logger.info("  [✓] Compliance Agent - COMPLETE")
+        ctx.logger.info("  [ ] Financial Agent - IN PROGRESS")
+        ctx.logger.info("  [ ] Risk Agent - WAITING")
+        ctx.logger.info("=" * 70)
 
     except Exception as e:
         ctx.logger.error(f"Error handling compliance response: {e}")
@@ -723,21 +804,27 @@ async def handle_find_supplier_response(
             f"✅ Stored supplier for monitoring: {best_supplier.company_name}"
         )
 
-        # NOW FORWARD TO 3 ANALYSIS AGENTS IN PARALLEL
+        # NOW FORWARD TO COMPLIANCE AGENT FIRST (SEQUENTIAL PROCESSING)
         ctx.logger.info("")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("🚀 FORWARDING TO 3 ANALYSIS AGENTS IN PARALLEL")
+        ctx.logger.info("🚀 STARTING SEQUENTIAL ANALYSIS - STEP 1: COMPLIANCE")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("Will send requests to:")
+        ctx.logger.info("Sequential Analysis Order:")
         ctx.logger.info(f"  1. Compliance Agent: {COMPLIANCE_AGENT_ADDRESS}")
-        ctx.logger.info(f"  2. Financial Agent: {FINANCIAL_AGENT_ADDRESS}")
-        ctx.logger.info(f"  3. Risk Agent: {RISK_AGENT_ADDRESS}")
+        ctx.logger.info(
+            f"  2. Financial Agent: {FINANCIAL_AGENT_ADDRESS} (after compliance)"
+        )
+        ctx.logger.info(f"  3. Risk Agent: {RISK_AGENT_ADDRESS} (after financial)")
         ctx.logger.info("=" * 70)
 
+        # Store supplier info for subsequent agents
+        pending_responses[msg.request_id]["best_supplier"] = best_supplier.model_dump()
+        ctx.storage.set("pending_responses", pending_responses)
+
         try:
-            # Send to Compliance Agent
+            # Send ONLY to Compliance Agent first
             ctx.logger.info("")
-            ctx.logger.info("📤 [1/3] SENDING TO COMPLIANCE AGENT")
+            ctx.logger.info("📤 [STEP 1/3] SENDING TO COMPLIANCE AGENT")
             ctx.logger.info(f"Agent Address: {COMPLIANCE_AGENT_ADDRESS}")
             ctx.logger.info(f"Request ID: {msg.request_id}")
 
@@ -783,94 +870,13 @@ async def handle_find_supplier_response(
                 f"✅ ComplianceRequest successfully sent to Compliance Agent"
             )
             ctx.logger.info("")
-
-            # Send to Financial Agent
-            ctx.logger.info("📤 [2/3] SENDING TO FINANCIAL AGENT")
-            ctx.logger.info(f"Agent Address: {FINANCIAL_AGENT_ADDRESS}")
-            ctx.logger.info(f"Request ID: {msg.request_id}")
-
-            # Get country from supplier location (already extracted by find_supplier_agent)
-            # Location field contains the country name from B Corp profile (e.g., "Argentina", "United States")
-            supplier_country = best_supplier.location or "Unknown"
-            ctx.logger.info(f"Supplier Location/Country: {supplier_country}")
-
-            # Handle cases where location might still be "City, Province, Country" format
-            if "," in supplier_country:
-                # Extract country from multi-part location string
-                parts = supplier_country.split(",")
-                supplier_country = parts[-1].strip()
-                ctx.logger.info(f"Extracted Country: {supplier_country}")
-
-            financial_request = FinancialRequest(
-                request_id=msg.request_id,
-                supplier_name=best_supplier.company_name,
-                supplier_country=supplier_country,
-                industry=best_supplier.industry or "general",
-                timestamp="",
-            )
-
-            ctx.logger.info(f"Financial Request Details:")
-            ctx.logger.info(f"  - Supplier: {financial_request.supplier_name}")
-            ctx.logger.info(f"  - Country: {financial_request.supplier_country}")
-            ctx.logger.info(f"  - Industry: {financial_request.industry}")
-
-            await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
-
-            log_message_transmission(
-                ctx,
-                "SENT",
-                "FinancialRequest",
-                msg.request_id,
-                {
-                    "supplier_name": financial_request.supplier_name,
-                    "supplier_country": financial_request.supplier_country,
-                    "industry": financial_request.industry,
-                },
-            )
-
-            ctx.logger.info(f"✅ FinancialRequest successfully sent to Financial Agent")
-            ctx.logger.info("")
-
-            # Send to Risk Agent
-            ctx.logger.info("📤 [3/3] SENDING TO RISK AGENT")
-            ctx.logger.info(f"Agent Address: {RISK_AGENT_ADDRESS}")
-            ctx.logger.info(f"Request ID: {msg.request_id}")
-
-            risk_request = RiskRequest(
-                request_id=msg.request_id,
-                supplier_name=best_supplier.company_name,
-                industry=best_supplier.industry or "general",
-                b_corp_profile_url=best_supplier.b_corp_profile_url or None,
-                timestamp="",
-            )
-
-            ctx.logger.info(f"Risk Request Details:")
-            ctx.logger.info(f"  - Supplier: {risk_request.supplier_name}")
-            ctx.logger.info(f"  - Industry: {risk_request.industry}")
-            ctx.logger.info(f"  - B Corp URL: {risk_request.b_corp_profile_url}")
-
-            await ctx.send(RISK_AGENT_ADDRESS, risk_request)
-
-            log_message_transmission(
-                ctx,
-                "SENT",
-                "RiskRequest",
-                msg.request_id,
-                {
-                    "supplier_name": risk_request.supplier_name,
-                    "industry": risk_request.industry,
-                },
-            )
-
-            ctx.logger.info(f"✅ RiskRequest successfully sent to Risk Agent")
-            ctx.logger.info("")
             ctx.logger.info("=" * 70)
-            ctx.logger.info("⏳ WAITING FOR ALL 3 ANALYSIS RESPONSES")
+            ctx.logger.info("⏳ WAITING FOR COMPLIANCE RESPONSE...")
             ctx.logger.info("=" * 70)
-            ctx.logger.info("Expecting responses from:")
-            ctx.logger.info("  [ ] Compliance Agent")
-            ctx.logger.info("  [ ] Financial Agent")
-            ctx.logger.info("  [ ] Risk Agent")
+            ctx.logger.info("Next steps after compliance completes:")
+            ctx.logger.info("  [ ] Compliance Agent - IN PROGRESS")
+            ctx.logger.info("  [ ] Financial Agent - WAITING")
+            ctx.logger.info("  [ ] Risk Agent - WAITING")
             ctx.logger.info("=" * 70)
 
         except Exception as e:
@@ -954,8 +960,60 @@ async def handle_financial_response(ctx: Context, sender: str, msg: FinancialRes
         ctx.logger.info(f"Supplier: {msg.supplier_name}")
         ctx.logger.info(f"Score: {msg.financial_score}/100")
 
-        # Check if we have both responses now
-        await check_and_send_combined_response(ctx, msg.request_id)
+        # SEQUENTIAL: Now trigger Risk Agent (Step 3/3)
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("✅ FINANCIAL COMPLETE - MOVING TO STEP 3: RISK")
+        ctx.logger.info("=" * 70)
+
+        # Get supplier info from stored data
+        best_supplier_data = pending_responses[msg.request_id].get("best_supplier")
+
+        if not best_supplier_data:
+            ctx.logger.error("No supplier data found, cannot proceed to risk agent")
+            return
+
+        # Send to Risk Agent
+        ctx.logger.info("📤 [STEP 3/3] SENDING TO RISK AGENT")
+        ctx.logger.info(f"Agent Address: {RISK_AGENT_ADDRESS}")
+        ctx.logger.info(f"Request ID: {msg.request_id}")
+
+        risk_request = RiskRequest(
+            request_id=msg.request_id,
+            supplier_name=best_supplier_data.get("company_name"),
+            industry=best_supplier_data.get("industry", "general"),
+            b_corp_profile_url=best_supplier_data.get("b_corp_profile_url"),
+            timestamp="",
+        )
+
+        ctx.logger.info(f"Risk Request Details:")
+        ctx.logger.info(f"  - Supplier: {risk_request.supplier_name}")
+        ctx.logger.info(f"  - Industry: {risk_request.industry}")
+        ctx.logger.info(f"  - B Corp URL: {risk_request.b_corp_profile_url}")
+
+        await ctx.send(RISK_AGENT_ADDRESS, risk_request)
+
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "RiskRequest",
+            msg.request_id,
+            {
+                "supplier_name": risk_request.supplier_name,
+                "industry": risk_request.industry,
+            },
+        )
+
+        ctx.logger.info(f"✅ RiskRequest successfully sent to Risk Agent")
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("⏳ WAITING FOR RISK RESPONSE...")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("Progress:")
+        ctx.logger.info("  [✓] Compliance Agent - COMPLETE")
+        ctx.logger.info("  [✓] Financial Agent - COMPLETE")
+        ctx.logger.info("  [ ] Risk Agent - IN PROGRESS")
+        ctx.logger.info("=" * 70)
 
     except Exception as e:
         ctx.logger.error(f"Error handling financial response: {e}")
@@ -1009,7 +1067,18 @@ async def handle_risk_response(ctx: Context, sender: str, msg: RiskResponse):
         ctx.logger.info(f"Supplier: {msg.supplier_name}")
         ctx.logger.info(f"Score: {msg.risk_score}/100")
 
-        # Check if we have all responses now
+        # SEQUENTIAL: All 3 agents complete - combine and send results
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("✅ ALL 3 AGENTS COMPLETE - COMBINING RESULTS")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("Progress:")
+        ctx.logger.info("  [✓] Compliance Agent - COMPLETE")
+        ctx.logger.info("  [✓] Financial Agent - COMPLETE")
+        ctx.logger.info("  [✓] Risk Agent - COMPLETE")
+        ctx.logger.info("=" * 70)
+
+        # Check if we have all responses now and send combined response
         await check_and_send_combined_response(ctx, msg.request_id)
 
     except Exception as e:
@@ -1169,6 +1238,78 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
         traceback.print_exc()
 
 
+async def store_monitoring_data_in_supabase(
+    ctx: Context,
+    supplier_name: str,
+    performance_response: Dict[str, Any],
+    demand_response: Dict[str, Any],
+    logistics_response: Dict[str, Any],
+) -> bool:
+    """
+    Store monitoring agent responses in Supabase database.
+
+    Args:
+        ctx: Agent context
+        supplier_name: Name of the supplier being monitored
+        performance_response: Performance agent response data
+        demand_response: Demand agent response data
+        logistics_response: Logistics agent response data
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        supabase_client = ctx.storage.get("supabase_client")
+
+        if not supabase_client:
+            ctx.logger.warning(
+                "⚠️ Supabase client not initialized - skipping data storage"
+            )
+            return False
+
+        # Determine overall status based on all three agent responses
+        performance_risk = performance_response.get("overall_risk_level", "UNKNOWN")
+        demand_performance = demand_response.get("overall_performance", "UNKNOWN")
+        logistics_status = logistics_response.get("overall_logistics_status", "UNKNOWN")
+
+        # Create overall status summary
+        overall_status = f"Risk: {performance_risk} | Performance: {demand_performance} | Logistics: {logistics_status}"
+
+        # Prepare data for insertion
+        monitoring_data = {
+            "supplier_name": supplier_name,
+            "demand_content": demand_response,
+            "performance_content": performance_response,
+            "logistics_content": logistics_response,
+            "overall_status": overall_status,
+        }
+
+        ctx.logger.info("📊 Storing monitoring data in Supabase...")
+        ctx.logger.info(f"   Supplier: {supplier_name}")
+        ctx.logger.info(f"   Overall Status: {overall_status}")
+
+        # Insert data into monitoring_conversations table
+        result = (
+            supabase_client.table("monitoring_conversations")
+            .insert(monitoring_data)
+            .execute()
+        )
+
+        ctx.logger.info("✅ Successfully stored monitoring data in Supabase")
+        ctx.logger.info(
+            f"   Record ID: {result.data[0]['id'] if result.data else 'N/A'}"
+        )
+
+        return True
+
+    except Exception as e:
+        ctx.logger.error(f"❌ Error storing monitoring data in Supabase: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 async def check_and_send_monitoring_response(ctx: Context, request_id: str):
     """Check if all 3 monitoring responses are received, combine them, and send to user"""
     pending_responses = ctx.storage.get("pending_responses") or {}
@@ -1200,6 +1341,16 @@ async def check_and_send_monitoring_response(ctx: Context, request_id: str):
     ctx.logger.info("=" * 70)
     ctx.logger.info("ALL 3 MONITORING RESPONSES RECEIVED - COMBINING RESULTS")
     ctx.logger.info("=" * 70)
+
+    # Store monitoring data in Supabase database
+    supplier_name = performance_response.get("supplier_name", "Unknown")
+    await store_monitoring_data_in_supabase(
+        ctx,
+        supplier_name,
+        performance_response,
+        demand_response,
+        logistics_response,
+    )
 
     user_sender = response_data.get("sender")
 
