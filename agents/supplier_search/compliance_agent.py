@@ -200,9 +200,13 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
             messages=[],
         )
 
+        ctx.logger.info("Invoking compliance workflow...")
         result = compliance_workflow.invoke(workflow_state)
 
         ctx.logger.info("LangGraph workflow completed")
+        ctx.logger.info(f"=" * 50)
+        ctx.logger.info(f"WORKFLOW RESULT KEYS: {list(result.keys())}")
+        ctx.logger.info(f"=" * 50)
 
         # Extract results
         compliance_score = result.get("compliance_score", 70.0)

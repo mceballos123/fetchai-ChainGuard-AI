@@ -233,15 +233,15 @@ class FinancialAnalysisSystem:
 
             # METHOD 2: Fallback to text parsing if DOM method didn't work
             if not headquarters_found:
-                all_text = soup.get_text(separator="|", strip=True)
+            all_text = soup.get_text(separator="|", strip=True)
                 hq_patterns = [
                     r"Headquarters\|([^|]+)\|?,?\|?([^|]*)",
                     r"Headquarters\|([^|]+)",
                     r"Headquarters[:\s]+([^|]+)",
                 ]
-                for pattern in hq_patterns:
-                    match = re.search(pattern, all_text, re.IGNORECASE)
-                    if match:
+            for pattern in hq_patterns:
+                match = re.search(pattern, all_text, re.IGNORECASE)
+                if match:
                         headquarters_text = " ".join(
                             g for g in match.groups() if g
                         ).strip()
@@ -259,7 +259,7 @@ class FinancialAnalysisSystem:
                                 f"✅ Country extracted: {scraped_data['country']}"
                             )
                             headquarters_found = True
-                            break
+                    break
 
             # Fallback: Look for "Operates In" if headquarters didn't work
             if not scraped_data["country"]:
@@ -316,11 +316,11 @@ class FinancialAnalysisSystem:
                     messages=[{"role": "user", "content": "Hello"}],
                 )
                 ctx.logger.info(f"✅ Ollama LLM connected: {self.llm_model}")
-            except Exception as e:
+        except Exception as e:
                 ctx.logger.warning(f"⚠️ Ollama connection test failed: {e}")
                 ctx.logger.info("Will use fallback analysis without LLM")
 
-            ctx.logger.info(
+                ctx.logger.info(
                 "Financial Analysis System initialized (with Ollama LLM, no Pinecone)"
             )
             self.initialized = True
@@ -368,7 +368,7 @@ class FinancialAnalysisSystem:
             ctx.logger.info(f"✅ LLM analysis received ({len(llm_response)} chars)")
             return llm_response
 
-        except Exception as e:
+                except Exception as e:
             ctx.logger.warning(f"⚠️ LLM query failed: {e}")
             return f"Financial analysis for {supplier_name} ({supplier_country}) trading with {user_country}."
 
@@ -410,9 +410,9 @@ class FinancialAnalysisSystem:
             ctx.logger.info(f"Scraping B Corp page for supplier country...")
             scraped_data = await self.scrape_bcorp_country(
                 ctx, supplier_name, b_corp_url
-            )
+                )
 
-            if "error" in scraped_data:
+                if "error" in scraped_data:
                 ctx.logger.error(f"Scraping failed: {scraped_data.get('error')}")
                 return self._generate_fallback_response(
                     supplier_name, "Unknown", user_country
@@ -652,7 +652,7 @@ def analyze_country_financial_risk(
                 "supply_chain_considerations",
             ]
             trade_relationship = f"High tariff environment ({user_country}-China)"
-        else:
+                            else:
             score = 45.0
             risk_factors = ["trade_restrictions", "economic_considerations"]
             trade_relationship = "Elevated trade restrictions"
@@ -746,7 +746,7 @@ def analyze_country_financial_risk(
     ]
     trade_relationship = f"Standard international ({user_country}-{supplier_country})"
 
-    return {
+        return {
         "financial_score": max(0.0, min(100.0, score)),
         "risk_factors": risk_factors,
         "trade_relationship": trade_relationship,
@@ -790,35 +790,35 @@ def financial_check_node(
         import asyncio
 
         try:
-            loop = asyncio.get_running_loop()
-            import concurrent.futures
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
 
-            def run_async():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(
+                def run_async():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(
                         analysis_system.analyze_financial_risk(
                             ctx=ctx,
-                            supplier_name=supplier_name,
+                                supplier_name=supplier_name,
                             industry=state.get("industry", ""),
-                            b_corp_url=b_corp_url,
+                                b_corp_url=b_corp_url,
                             user_country=user_country,
+                            )
                         )
-                    )
-                finally:
-                    new_loop.close()
+                    finally:
+                        new_loop.close()
 
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(run_async)
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(run_async)
             result = future.result(timeout=120)
-        except RuntimeError:
-            result = asyncio.run(
+            except RuntimeError:
+                result = asyncio.run(
                 analysis_system.analyze_financial_risk(
                     ctx=ctx,
-                    supplier_name=supplier_name,
+                        supplier_name=supplier_name,
                     industry=state.get("industry", ""),
-                    b_corp_url=b_corp_url,
+                        b_corp_url=b_corp_url,
                     user_country=user_country,
                 )
             )
@@ -889,7 +889,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     """Node 3b: Error path - Financial requirements not met."""
     state["current_step"] = "financial_rejected"
     state["should_continue"] = False
-    ctx.logger.info(
+        ctx.logger.info(
         f"❌ Financial REJECTED - Score: {state.get('financial_score', 0)}/100"
     )
     return state

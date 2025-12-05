@@ -168,6 +168,29 @@ class ComplianceAnalysisSystem:
                         break
 
             ctx.logger.info(f"Successfully scraped data for {supplier_name}")
+            ctx.logger.info(f"=" * 50)
+            ctx.logger.info(f"SCRAPED DATA SUMMARY:")
+            ctx.logger.info(f"  - Supplier: {scraped_data['supplier_name']}")
+            ctx.logger.info(f"  - URL: {scraped_data['url']}")
+            ctx.logger.info(
+                f"  - Overall Score: {scraped_data.get('overall_score', 'N/A')}"
+            )
+            ctx.logger.info(
+                f"  - Governance: {len(scraped_data.get('governance', ''))} chars"
+            )
+            ctx.logger.info(
+                f"  - Workers: {len(scraped_data.get('workers', ''))} chars"
+            )
+            ctx.logger.info(
+                f"  - Community: {len(scraped_data.get('community', ''))} chars"
+            )
+            ctx.logger.info(
+                f"  - Environment: {len(scraped_data.get('environment', ''))} chars"
+            )
+            ctx.logger.info(
+                f"  - Customers: {len(scraped_data.get('customers', ''))} chars"
+            )
+            ctx.logger.info(f"=" * 50)
             return scraped_data
 
         except Exception as e:
@@ -272,6 +295,7 @@ class ComplianceAnalysisSystem:
 
             llm_response = response["message"]["content"]
             ctx.logger.info(f"LLM analysis received ({len(llm_response)} chars)")
+            ctx.logger.info(f"LLM Response Preview: {llm_response[:500]}...")
             return llm_response
 
         except Exception as e:
@@ -356,6 +380,7 @@ class ComplianceAnalysisSystem:
             """
 
             ctx.logger.info(f"Formatted supplier data for LLM analysis")
+            ctx.logger.info(f"Supplier text length: {len(supplier_text)} chars")
 
             # ================================================================
             # STEP 3: QUERY OLLAMA LLM WITH COMPLIANCE PROMPT

@@ -24,7 +24,7 @@ load_dotenv()
 risk_agent = Agent(
     name="risk_agent",
     seed=os.getenv("RISK_AGENT_SEED"),
-    port=8003,
+    port=8011,
     mailbox=True,
 )
 

@@ -1,8 +1,9 @@
 def risk_prompt(supplier_name, industry):
     return f"""
             YOU TASK IS TO:
-            Analyze the risk management of the supplier {supplier_name} in the industry {industry} and score it from 0-100:
-            
+            Analyze the risk management of the supplier {supplier_name} in the industry {industry} and score it from 0-100 using the scraped data from the B Corp page:
+            When evulating be fair with the information that is provided to you. Do not make up any data from the page that is not provided to you.
+            Additonaly yes I know that the data is not perfect and doesn't contain alot of information but make the best assessment you can with the data available to you. At the same time don't be too hard on the supplier since we have little information to work with. Keep this in mind this page is preapporved supplier but at the same time still evulaute the risk management of the supplier
             Score it from 0-100:
             - 70-100: Excellent risk management, minimal vulnerabilities
             - 60-69: Good risk management, acceptable with minor considerations (APPROVED)

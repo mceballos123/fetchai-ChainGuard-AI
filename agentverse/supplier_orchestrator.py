@@ -1907,10 +1907,35 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
             failed_area = failed_requirements[0]
             recommendation_summary = f"The supplier shows strength in {' and '.join(passed_requirements)}, but {failed_area} concerns must be mitigated to proceed with partnership."
 
+    # Get supplier name and related data
+    supplier_name = compliance_response.get("supplier_name", "Unknown Supplier")
+    supplier_country = financial_response.get("supplier_country", "Unknown")
+    user_country = financial_response.get("user_country", "United States")
+    
+    # Extract industry/establishment from user query
+    query_lower = (user_query or "").lower()
+    establishment = "business"
+    if "pizza" in query_lower:
+        establishment = "pizza"
+    elif "coffee" in query_lower:
+        establishment = "coffee"
+    elif "restaurant" in query_lower:
+        establishment = "restaurant"
+    elif "food" in query_lower:
+        establishment = "food"
+    elif "bakery" in query_lower:
+        establishment = "bakery"
+    elif "cafe" in query_lower:
+        establishment = "cafe"
+    elif "retail" in query_lower:
+        establishment = "retail"
+
     # Format financial details cleanly without bullet points
     financial_details = financial_response.get("financial_details", "N/A")
+    # Remove "LLM Analysis:" prefix if present
+    financial_details = financial_details.replace("LLM Analysis:", f"{supplier_name} Financial Overview:")
 
-    # Format risk factors - include even small ones without being nice
+    # Format risk factors - include even small ones
     risk_factors = financial_response.get("risk_factors", [])
     if risk_factors:
         risk_factors_text = "\n".join([f"  • {factor}" for factor in risk_factors])
@@ -1937,17 +1962,44 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
     else:
         risk_mgmt_factors_text = "  • No significant risk factors identified"
 
+    # Build brief summary based on approval status
+    compliance_score = compliance_response.get("compliance_score", 0)
+    financial_score = financial_response.get("financial_score", 0)
+    risk_score = risk_response.get("risk_score", 0)
+    
+    if overall_approved:
+        brief_summary = f"""
+Why {supplier_name} is a good fit for your {establishment} business:
+
+{supplier_name} demonstrates strong alignment with your business needs. With a compliance score of {compliance_score}/100, they show commitment to ethical practices and sustainability. Their financial stability (score: {financial_score}/100) suggests reliable partnership potential, especially for {user_country}-{supplier_country} trade relations. The risk management assessment ({risk_score}/100) indicates minimal operational vulnerabilities, making them a dependable supplier choice for your {establishment} establishment.
+"""
+    else:
+        areas_of_concern = []
+        if not compliance_passed:
+            areas_of_concern.append(f"compliance ({compliance_score}/100)")
+        if not financial_passed:
+            areas_of_concern.append(f"financial ({financial_score}/100)")
+        if not risk_passed:
+            areas_of_concern.append(f"risk management ({risk_score}/100)")
+        
+        brief_summary = f"""
+Why {supplier_name} may not be ideal for your {establishment} business at this time:
+
+While {supplier_name} shows some positive attributes, there are concerns in {', '.join(areas_of_concern)} that should be addressed. For your {establishment} business operating from {user_country}, these factors could impact reliability and partnership success. We recommend exploring alternative suppliers or requesting additional information from {supplier_name} to address these concerns before proceeding.
+"""
+
     response_text = f"""
-{approval_header}
+{approval_header} with your {establishment} business
 
-SUPPLIER ANALYSIS REPORT
+Supplier Analysis Report for your {establishment} business
 
-Business Owner: {compliance_response.get('supplier_name', 'N/A')}
-Supplier Status: {'APPROVED' if overall_approved else 'NOT APPROVED'}
+{supplier_name} Status: {'Approved' if overall_approved else 'Not Approved'}
 
-Supplier Requirements: {requirements_text}
+Evaluation Summary: {requirements_text}
 
-COMPLIANCE ANALYSIS
+---
+
+{supplier_name} Compliance Overview
 
 Overall Compliance Score: {compliance_response.get('compliance_score')}/100
 
@@ -1960,17 +2012,21 @@ Sustainability Practices:
 Violations Found: {violations_count}
 {violations_text}
 
-FINANCIAL RISK ANALYSIS
+---
+
+{supplier_name} Financial Risk Analysis
 
 Financial Risk Score: {financial_response.get('financial_score')}/100 (Higher = Lower Risk)
 
 Operating & Cost Assessment:
 {financial_details}
 
-Risk Factors Identified: {len(risk_factors)}
+Financial Risk Factors Identified: {len(risk_factors)}
 {risk_factors_text}
 
-RISK MANAGEMENT ANALYSIS
+---
+
+{supplier_name} Risk Management Analysis
 
 Risk Management Score: {risk_response.get('risk_score')}/100 (Higher = Lower Risk)
 
@@ -1980,9 +2036,16 @@ Risk Assessment:
 Identified Risk Factors: {len(risk_factors_list)}
 {risk_mgmt_factors_text}
 
-RECOMMENDATION
+---
+
+Recommendation
 
 {recommendation_summary}
+
+---
+
+Summary
+{brief_summary}
     """
 
     # Send combined response back to user via chat
