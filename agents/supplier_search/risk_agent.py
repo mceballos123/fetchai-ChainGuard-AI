@@ -88,20 +88,21 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
     Handle risk management check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info and B Corp profile URL
-    2. Create workflow state from request
-    3. Run LangGraph risk management workflow with RAG + Web Scraping:
-       - risk_check_node: Scrape B Corp page + RAG analysis
+    1. Check for duplicate request (deduplication)
+    2. Receive supplier info and B Corp profile URL
+    3. Create workflow state from request
+    4. Run LangGraph risk management workflow:
+       - risk_check_node: Scrape B Corp page + LLM analysis
        - risk_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
-    4. Build RiskResponse from workflow result
-    5. Return response to orchestrator
+    5. Build RiskResponse from workflow result
+    6. Return response to orchestrator
 
     Note: Works in parallel with compliance_agent. Both must pass (>= 60) for supplier approval.
     """
     ctx.logger.info("")
     ctx.logger.info("=" * 70)
-    ctx.logger.info("📥 RISK AGENT: RECEIVED REQUEST")
+    ctx.logger.info("RISK AGENT: RECEIVED REQUEST")
     ctx.logger.info("=" * 70)
     ctx.logger.info(f"From: {sender}")
     ctx.logger.info(f"Request ID: {msg.request_id}")
@@ -109,6 +110,20 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
     ctx.logger.info(f"Industry: {msg.industry}")
     ctx.logger.info(f"B Corp Profile URL: {msg.b_corp_profile_url}")
     ctx.logger.info("=" * 70)
+
+    # === DEDUPLICATION: Check if we've already processed this request ===
+    processed_request_ids = ctx.storage.get("processed_request_ids") or []
+    if msg.request_id in processed_request_ids:
+        ctx.logger.warning(f"DUPLICATE REQUEST DETECTED: {msg.request_id}")
+        ctx.logger.warning("This request has already been processed. Ignoring.")
+        return  # Skip duplicate processing
+
+    # Mark this request as being processed
+    processed_request_ids.append(msg.request_id)
+    # Keep only the last 100 request IDs to prevent memory bloat
+    if len(processed_request_ids) > 100:
+        processed_request_ids = processed_request_ids[-100:]
+    ctx.storage.set("processed_request_ids", processed_request_ids)
 
     # Update current supplier state
     current_supplier_info = {
@@ -207,7 +222,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
         # Send response back to sender (Orchestrator Agent)
         ctx.logger.info("")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("📤 RISK AGENT: SENDING RESPONSE")
+        ctx.logger.info("RISK AGENT: SENDING RESPONSE")
         ctx.logger.info("=" * 70)
         ctx.logger.info(f"To: {sender}")
         ctx.logger.info(f"Request ID: {msg.request_id}")

@@ -111,26 +111,27 @@ def get_supplier_state(ctx: Context) -> Dict[str, Any]:
     }
 
 
-# process the complaicne requence from the supplier search agent
+# process the compliance request from the supplier search agent
 @compliance_protocol.on_message(model=ComplianceRequest, replies=ComplianceResponse)
 async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRequest):
     """
     Handle compliance check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info and company values
-    2. Store previous state and update current state
-    3. Create workflow state from request
-    4. Run LangGraph compliance workflow:
-       - compliance_check_node: RAG analysis
-       - compliance_router: conditional routing (score >= 75?)
+    1. Check for duplicate request (deduplication)
+    2. Receive supplier info and company values
+    3. Store previous state and update current state
+    4. Create workflow state from request
+    5. Run LangGraph compliance workflow:
+       - compliance_check_node: LLM analysis
+       - compliance_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
-    5. Build ComplianceResponse from workflow result
-    6. Return response to orchestrator
+    6. Build ComplianceResponse from workflow result
+    7. Return response to orchestrator
     """
     ctx.logger.info("")
     ctx.logger.info("=" * 70)
-    ctx.logger.info("📥 COMPLIANCE AGENT: RECEIVED REQUEST")
+    ctx.logger.info("COMPLIANCE AGENT: RECEIVED REQUEST")
     ctx.logger.info("=" * 70)
     ctx.logger.info(f"From: {sender}")
     ctx.logger.info(f"Request ID: {msg.request_id}")
@@ -139,6 +140,20 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
     ctx.logger.info(f"Company Values: {msg.company_values[:50]}...")
     ctx.logger.info(f"B Corp Profile URL: {msg.b_corp_profile_url}")
     ctx.logger.info("=" * 70)
+
+    # === DEDUPLICATION: Check if we've already processed this request ===
+    processed_request_ids = ctx.storage.get("processed_request_ids") or []
+    if msg.request_id in processed_request_ids:
+        ctx.logger.warning(f"DUPLICATE REQUEST DETECTED: {msg.request_id}")
+        ctx.logger.warning("This request has already been processed. Ignoring.")
+        return  # Skip duplicate processing
+
+    # Mark this request as being processed
+    processed_request_ids.append(msg.request_id)
+    # Keep only the last 100 request IDs to prevent memory bloat
+    if len(processed_request_ids) > 100:
+        processed_request_ids = processed_request_ids[-100:]
+    ctx.storage.set("processed_request_ids", processed_request_ids)
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)

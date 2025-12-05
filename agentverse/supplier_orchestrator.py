@@ -3,7 +3,7 @@ from uagents import Agent, Context, Protocol
 from dotenv import load_dotenv
 import os
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 from supabase import create_client, Client
 
 # backend/agents/supplier_search
@@ -30,6 +30,14 @@ from test_func.orchestrator_helpers import (
     verify_orchestrator_connection,
     log_message_transmission,
     validate_request_before_sending,
+)
+
+# Import instruction prompts for handling irrelevant queries
+from prompts.instructions import (
+    INSTRUCTIONS_PROMPT,
+    GREETING_RESPONSE,
+    MONITOR_WITHOUT_SUPPLIER_RESPONSE,
+    HELP_RESPONSE,
 )
 
 load_dotenv()
@@ -141,6 +149,182 @@ def determine_product_category(user_query: str) -> str:
 
     # Default to food if no match
     return "food"
+
+
+def analyze_query_relevance(user_query: str, has_selected_supplier: bool = False) -> Tuple[bool, str, str]:
+    """
+    Analyze whether the user query is relevant to ChainGuard AI's capabilities.
+    
+    This function uses semantic analysis to determine if the query is:
+    1. A valid supplier search request
+    2. A valid monitoring request
+    3. A greeting or help request
+    4. An irrelevant/off-topic query
+    
+    Args:
+        user_query: The user's input message
+        has_selected_supplier: Whether the user already has a selected supplier
+        
+    Returns:
+        Tuple of (is_relevant, query_type, response_message)
+        - is_relevant: True if this is a valid ChainGuard request
+        - query_type: "find_supplier", "monitor", "greeting", "help", or "irrelevant"
+        - response_message: Pre-built response for non-actionable queries
+    """
+    query_lower = user_query.lower().strip()
+    
+    # Empty or very short queries
+    if len(query_lower) < 2:
+        return False, "irrelevant", GREETING_RESPONSE
+    
+    # SUPPLIER SEARCH INDICATORS
+    # Look for patterns that indicate a supplier search intent
+    find_supplier_patterns = [
+        "find",
+        "search",
+        "looking for",
+        "look for",
+        "need a",
+        "want a",
+        "want to find",
+        "i'm a",
+        "i am a",
+        "business owner",
+        "supplier",
+        "vendor",
+        "source",
+        "b corp",
+        "b-corp",
+        "bcorp",
+        "ethical",
+        "sustainable",
+        "certified",
+    ]
+    
+    # Business type indicators that suggest supplier search
+    business_indicators = [
+        "coffee",
+        "pizza",
+        "restaurant",
+        "food",
+        "bakery",
+        "cafe",
+        "tea",
+        "chocolate",
+        "grocery",
+        "clothing",
+        "apparel",
+        "fashion",
+        "textile",
+        "technology",
+        "software",
+        "electronics",
+        "organic",
+        "farm",
+        "produce",
+    ]
+    
+    # MONITORING INDICATORS
+    monitoring_patterns = [
+        "monitor",
+        "monitoring",
+        "update",
+        "status",
+        "check on",
+        "check up",
+        "how is",
+        "report on",
+        "track",
+        "tracking",
+        "performance",
+        "logistics",
+        "inventory",
+        "demand",
+    ]
+    
+    # GREETING INDICATORS
+    greeting_patterns = [
+        "hi",
+        "hello",
+        "hey",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "greetings",
+        "howdy",
+        "what's up",
+        "whats up",
+        "yo",
+    ]
+    
+    # HELP/INFO INDICATORS
+    help_patterns = [
+        "help",
+        "how do",
+        "how does",
+        "how to",
+        "what is",
+        "what's",
+        "what are",
+        "explain",
+        "tell me about",
+        "can you",
+        "what can",
+        "features",
+        "capabilities",
+        "instructions",
+        "tutorial",
+        "guide",
+    ]
+    
+    # Check for supplier search intent
+    has_find_pattern = any(pattern in query_lower for pattern in find_supplier_patterns)
+    has_business_type = any(indicator in query_lower for indicator in business_indicators)
+    
+    if has_find_pattern and has_business_type:
+        return True, "find_supplier", ""
+    
+    # Check for monitoring intent
+    has_monitoring_pattern = any(pattern in query_lower for pattern in monitoring_patterns)
+    
+    if has_monitoring_pattern:
+        if has_selected_supplier:
+            return True, "monitor", ""
+        else:
+            # User wants to monitor but hasn't selected a supplier yet
+            return False, "monitor_no_supplier", MONITOR_WITHOUT_SUPPLIER_RESPONSE
+    
+    # Check for greetings (simple hi, hello, etc.)
+    # Only match if the query is primarily a greeting (short queries)
+    if len(query_lower.split()) <= 3:
+        is_greeting = any(query_lower.startswith(g) or query_lower == g for g in greeting_patterns)
+        if is_greeting:
+            return False, "greeting", GREETING_RESPONSE
+    
+    # Check for help/info requests
+    has_help_pattern = any(pattern in query_lower for pattern in help_patterns)
+    if has_help_pattern:
+        # Check if they're asking about ChainGuard specifically
+        chainguard_mentions = ["chainguard", "chain guard", "this agent", "this platform", "you"]
+        if any(mention in query_lower for mention in chainguard_mentions):
+            return False, "help", HELP_RESPONSE
+        # General help request
+        return False, "help", HELP_RESPONSE
+    
+    # Check if query has enough context to be a supplier search even without explicit patterns
+    # E.g., "coffee supplier UK" or "pizza business United States"
+    if has_business_type:
+        # Check for country mentions which would indicate a business context
+        country_indicators = [
+            "us", "usa", "uk", "united states", "united kingdom", "canada", "australia",
+            "germany", "france", "spain", "italy", "business", "company", "shop", "store"
+        ]
+        if any(country in query_lower for country in country_indicators):
+            return True, "find_supplier", ""
+    
+    # If none of the above, it's likely irrelevant
+    # Generate a friendly response guiding them back to ChainGuard features
+    return False, "irrelevant", GREETING_RESPONSE
 
 
 def extract_user_country(user_query: str) -> str:
@@ -452,20 +636,43 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
     ctx.logger.info(f"User Query: {user_query}")
 
-    # Step 3: Determine if this is a monitoring request or find supplier request
-    user_query_lower = user_query.lower()
-    monitoring_keywords = [
-        "monitor",
-        "update",
-        "status",
-        "check on",
-        "check up",
-        "how is",
-        "report on",
-    ]
-    is_monitoring_request = any(
-        keyword in user_query_lower for keyword in monitoring_keywords
+    # Step 3: Analyze query relevance to determine how to handle it
+    selected_supplier = ctx.storage.get("selected_supplier")
+    has_supplier = selected_supplier is not None and selected_supplier != ""
+    
+    is_relevant, query_type, instruction_response = analyze_query_relevance(
+        user_query, has_selected_supplier=has_supplier
     )
+    
+    ctx.logger.info(f"Query Analysis: relevant={is_relevant}, type={query_type}")
+    
+    # Handle irrelevant or informational queries with instruction responses
+    if not is_relevant:
+        ctx.logger.info(f"Query type '{query_type}' - sending instruction response")
+        
+        instruction_message = ChatMessage(
+            timestamp="",
+            msg_id=uuid4(),
+            content=[
+                TextContent(
+                    type="text",
+                    text=instruction_response.strip(),
+                ),
+                EndSessionContent(type="end-session"),
+            ],
+        )
+        await ctx.send(sender, instruction_message)
+        log_message_transmission(
+            ctx,
+            "SENT",
+            "ChatMessage",
+            str(instruction_message.msg_id),
+            {"type": "instruction", "query_type": query_type},
+        )
+        return
+    
+    # Determine if this is a monitoring request based on query_type
+    is_monitoring_request = query_type == "monitor"
 
     # Step 4: Store session information
     msg_id = str(msg.msg_id)
