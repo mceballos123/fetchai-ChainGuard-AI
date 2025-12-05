@@ -36,7 +36,7 @@ EMBEDDING_DIMENSION = 768
 
 
 class FinancialRAGSystem:
-    """RAG system for financial risk analysis using B Corp page data and country-based tariff/inflation analysis"""
+    """RAG system for financial risk analysis - extracts country from B Corp Headquarters section only"""
 
     def __init__(self):
         self.initialized = False
@@ -59,25 +59,109 @@ class FinancialRAGSystem:
         self.documents = []
         self.scraped_tariff_data = {}
 
+    def _extract_country_from_text(self, text: str, ctx: Context) -> Optional[str]:
+        """
+        Extract country name from text content.
+
+        Args:
+            text: Text to search for country
+            ctx: Context for logging
+
+        Returns:
+            Country name or None
+        """
+        if not text:
+            return None
+
+        known_countries = [
+            "Argentina",
+            "Brazil",
+            "Chile",
+            "Colombia",
+            "Mexico",
+            "Peru",
+            "Uruguay",
+            "Venezuela",
+            "Ecuador",
+            "Bolivia",
+            "Paraguay",
+            "United States",
+            "USA",
+            "Canada",
+            "United Kingdom",
+            "UK",
+            "Germany",
+            "France",
+            "Spain",
+            "Italy",
+            "Netherlands",
+            "Belgium",
+            "Switzerland",
+            "Austria",
+            "Portugal",
+            "Sweden",
+            "Norway",
+            "Denmark",
+            "Finland",
+            "Ireland",
+            "Australia",
+            "New Zealand",
+            "Japan",
+            "China",
+            "India",
+            "South Korea",
+            "Singapore",
+            "Taiwan",
+            "Thailand",
+            "Vietnam",
+            "Indonesia",
+            "Malaysia",
+            "Philippines",
+            "South Africa",
+            "Kenya",
+            "Nigeria",
+            "Egypt",
+            "Morocco",
+            "Israel",
+            "United Arab Emirates",
+            "Saudi Arabia",
+        ]
+
+        text_lower = text.lower()
+
+        # Check for each known country
+        for country in known_countries:
+            if country.lower() in text_lower:
+                # Special handling for USA -> United States
+                if country == "USA":
+                    return "United States"
+                return country
+
+        # If no known country found, try to extract from comma-separated location
+        parts = text.split(",")
+        if len(parts) > 1:
+            potential_country = parts[-1].strip()
+            if len(potential_country) > 2 and potential_country[0].isupper():
+                return potential_country
+
+        return None
+
     async def scrape_bcorp_financial_page(
-        self, ctx: Context, supplier_name: str, b_corp_url: str, country: str
+        self, ctx: Context, supplier_name: str, b_corp_url: str
     ) -> Dict[str, str]:
         """
-        Scrape B Corp page for financial-relevant data.
+        Scrape B Corp page ONLY to extract country from Headquarters section.
 
         Args:
             supplier_name: Name of supplier
             b_corp_url: B Corp profile URL
-            country: Country where supplier operates
 
         Returns:
-            Dictionary with scraped B Corp data relevant to financial analysis
+            Dictionary with supplier_name, country, and url
         """
         driver = None
         try:
-            ctx.logger.info(
-                f"Scraping B Corp page for financial analysis: {supplier_name}"
-            )
+            ctx.logger.info(f"Scraping B Corp page to extract country: {supplier_name}")
 
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
@@ -98,56 +182,59 @@ class FinancialRAGSystem:
 
             scraped_data = {
                 "supplier_name": supplier_name,
-                "country": country,
+                "country": "",
                 "url": b_corp_url,
-                "headquarters": "",
-                "size": "",
-                "sector": "",
-                "industry": "",
-                "overall_score": "",
-                "full_content": "",
             }
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
 
-            # Extract main content for analysis
-            main_content = soup.get_text(separator=" ", strip=True)
-            scraped_data["full_content"] = main_content[:5000]
-
-            # Extract headquarters
-            hq_patterns = [r"Headquarters[:\s]+([^|]+)", r"Operates In[:\s]+([^|]+)"]
+            # ONLY extract headquarters to get country - nothing else
             all_text = soup.get_text(separator="|", strip=True)
+
+            # Look for Headquarters section (e.g., "Headquarters|Catalonia, Spain")
+            hq_patterns = [
+                r"Headquarters\|([^|]+)",
+                r"Headquarters[:\s]+([^|]+)",
+            ]
+
             for pattern in hq_patterns:
                 match = re.search(pattern, all_text, re.IGNORECASE)
                 if match:
-                    scraped_data["headquarters"] = match.group(1).strip()
+                    headquarters_text = match.group(1).strip()
+                    ctx.logger.info(f"Found Headquarters: {headquarters_text}")
+
+                    # Extract country from headquarters (e.g., "Catalonia, Spain" -> "Spain")
+                    scraped_data["country"] = self._extract_country_from_text(
+                        headquarters_text, ctx
+                    )
+                    if scraped_data["country"]:
+                        ctx.logger.info(
+                            f"✅ Country extracted: {scraped_data['country']}"
+                        )
                     break
 
-            # Extract company size
-            size_match = re.search(
-                r"(\d+[-\s]+\d+)\s+employees", main_content, re.IGNORECASE
-            )
-            if size_match:
-                scraped_data["size"] = size_match.group(1)
+            # Fallback: Look for "Operates In" if headquarters didn't work
+            if not scraped_data["country"]:
+                operates_pattern = r"Operates In\|([^|]+)"
+                match = re.search(operates_pattern, all_text, re.IGNORECASE)
+                if match:
+                    operates_text = match.group(1).strip()
+                    scraped_data["country"] = self._extract_country_from_text(
+                        operates_text, ctx
+                    )
+                    if scraped_data["country"]:
+                        ctx.logger.info(
+                            f"✅ Country from 'Operates In': {scraped_data['country']}"
+                        )
 
-            # Extract sector and industry
-            sector_match = re.search(r"Sector[:\s]+([^\n|]+)", all_text, re.IGNORECASE)
-            if sector_match:
-                scraped_data["sector"] = sector_match.group(1).strip()
+            # Default if no country found
+            if not scraped_data["country"]:
+                scraped_data["country"] = "Unknown"
+                ctx.logger.warning(
+                    "⚠️ Could not determine country - defaulting to Unknown"
+                )
 
-            industry_match = re.search(
-                r"Industry[:\s]+([^\n|]+)", all_text, re.IGNORECASE
-            )
-            if industry_match:
-                scraped_data["industry"] = industry_match.group(1).strip()
-
-            # Extract B Impact Score
-            score_element = soup.find("div", class_=re.compile(".*score.*", re.I))
-            if score_element:
-                score_text = score_element.get_text(strip=True)
-                scraped_data["overall_score"] = score_text
-
-            ctx.logger.info(f"Successfully scraped B Corp data for {supplier_name}")
+            ctx.logger.info(f"Country extraction complete: {scraped_data['country']}")
             return scraped_data
 
         except Exception as e:
@@ -158,7 +245,7 @@ class FinancialRAGSystem:
 
             return {
                 "supplier_name": supplier_name,
-                "country": country,
+                "country": "Unknown",
                 "url": b_corp_url,
                 "error": str(e),
             }
@@ -268,20 +355,18 @@ class FinancialRAGSystem:
         self,
         ctx: Context,
         supplier_name: str,
-        country: str,
         industry: str,
         b_corp_url: str = "",
     ) -> Dict[str, Any]:
         """
-        Query RAG system for financial risk analysis using B Corp data and country-based analysis.
+        Query RAG system for financial risk analysis - extract country from Headquarters only.
 
         Process:
-        1. Scrape B Corp page for supplier data
+        1. Scrape B Corp page ONLY for Headquarters section to extract country
         2. Apply country-specific financial risk analysis based on US trade relationships
-        3. Convert data to Document and create embeddings
-        4. Store embeddings in Pinecone
-        5. Query RAG system for financial risk analysis
-        6. Return structured financial data
+        3. Create simple document with country and analysis
+        4. Store in Pinecone and query for financial risk
+        5. Return structured financial data
 
         Returns:
         {
@@ -293,63 +378,46 @@ class FinancialRAGSystem:
         """
         if not self.initialized:
             ctx.logger.error("RAG system not initialized")
-            return self._generate_fallback_response(supplier_name, country)
+            return self._generate_fallback_response(supplier_name, "Unknown")
 
         try:
-            # Step 1: Validate inputs
-            if not country:
-                ctx.logger.error("No country provided for financial analysis")
-                return self._generate_fallback_response(supplier_name, country)
+            # Step 1: Scrape B Corp page to extract country from Headquarters section ONLY
 
             if not b_corp_url:
-                ctx.logger.warning(
-                    "No B Corp URL provided, using country-based analysis only"
-                )
-                scraped_data = {
-                    "supplier_name": supplier_name,
-                    "country": country,
-                    "url": "",
-                    "full_content": f"Supplier {supplier_name} operates in {country}. Industry: {industry}.",
-                }
-            else:
-                # Scrape B Corp page for additional context
-                scraped_data = await self.scrape_bcorp_financial_page(
-                    ctx, supplier_name, b_corp_url, country
-                )
+                ctx.logger.error("No B Corp URL provided for financial analysis")
+                return self._generate_fallback_response(supplier_name, "Unknown")
 
-                if "error" in scraped_data:
-                    ctx.logger.warning(
-                        "B Corp scraping failed, using country-based analysis only"
-                    )
-                    scraped_data["full_content"] = (
-                        f"Supplier {supplier_name} operates in {country}. Industry: {industry}."
-                    )
+            # Scrape B Corp page to extract country from Headquarters section
+            ctx.logger.info(
+                f"Scraping B Corp Headquarters section to extract country..."
+            )
+            scraped_data = await self.scrape_bcorp_financial_page(
+                ctx, supplier_name, b_corp_url
+            )
+
+            if "error" in scraped_data:
+                ctx.logger.error(f"B Corp scraping failed: {scraped_data.get('error')}")
+                return self._generate_fallback_response(supplier_name, "Unknown")
+
+            # Extract country from scraped data
+            country = scraped_data.get("country", "Unknown")
+            ctx.logger.info(f"📍 Country extracted from B Corp page: {country}")
 
             # Step 2: Apply country-specific financial risk analysis
             country_analysis = analyze_country_financial_risk(
                 scraped_data, country, ctx
             )
 
-            # Step 3: Convert scraped data to LlamaIndex Document
+            # Step 3: Create simple document with country and analysis
             financial_text = f"""
             Supplier: {supplier_name}
             Operating Country: {country}
             Industry: {industry}
             
-            B CORP INFORMATION:
-            Headquarters: {scraped_data.get('headquarters', country)}
-            Sector: {scraped_data.get('sector', 'Unknown')}
-            Industry: {scraped_data.get('industry', industry)}
-            Size: {scraped_data.get('size', 'Unknown')}
-            B Impact Score: {scraped_data.get('overall_score', 'Unknown')}
-            
             FINANCIAL RISK ANALYSIS:
             Based on US trade relationship with {country}:
             Financial Score: {country_analysis['financial_score']}/100
             Risk Factors: {', '.join(country_analysis['risk_factors'])}
-            
-            FULL CONTEXT:
-            {scraped_data.get('full_content', 'No additional context')[:3000]}
             """
 
             # Create Document object
@@ -387,16 +455,14 @@ class FinancialRAGSystem:
             if is_us:
                 result["financial_details"] = (
                     f"US domestic supplier analysis for {supplier_name}. No import tariffs apply. "
-                    f"Analysis based on US economic conditions and B Corp certification standards."
+                    f"Analysis based on US economic conditions."
                 )
             else:
                 result["financial_details"] = (
                     f"International supplier analysis for {supplier_name} from {country}. "
-                    f"Financial risk evaluated based on US-{country} trade relationship and B Corp data. "
+                    f"Financial risk evaluated based on US-{country} trade relationship. "
                     f"Score: {country_analysis['financial_score']}/100."
                 )
-
-            result["scraped_data"] = scraped_data
 
             return result
 
@@ -405,7 +471,7 @@ class FinancialRAGSystem:
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name, country)
+            return self._generate_fallback_response(supplier_name, "Unknown")
 
     async def _parse_rag_response(
         self, ctx: Context, response_text: str, supplier_name: str, country: str
@@ -478,7 +544,7 @@ class FinancialRAGSystem:
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name, country)
+            return self._generate_fallback_response(supplier_name, "Unknown")
 
     def _generate_fallback_response(
         self, supplier_name: str, country: str = "Unknown"
@@ -494,7 +560,6 @@ class FinancialRAGSystem:
     def query_financial_documents_sync(
         self,
         supplier_name: str,
-        country: str,
         industry: str,
         b_corp_url: str = "",
     ) -> Dict[str, Any]:
@@ -539,7 +604,6 @@ class FinancialRAGSystem:
                             self.query_financial_documents(
                                 ctx=mock_ctx,
                                 supplier_name=supplier_name,
-                                country=country,
                                 industry=industry,
                                 b_corp_url=b_corp_url,
                             )
@@ -557,7 +621,6 @@ class FinancialRAGSystem:
                     self.query_financial_documents(
                         ctx=mock_ctx,
                         supplier_name=supplier_name,
-                        country=country,
                         industry=industry,
                         b_corp_url=b_corp_url,
                     )
@@ -567,41 +630,42 @@ class FinancialRAGSystem:
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name, country)
+            return self._generate_fallback_response(supplier_name, "Unknown")
 
 
 def financial_check_node(
     state: SupplierWorkflowState, rag_system: FinancialRAGSystem, ctx: Context
 ) -> SupplierWorkflowState:
     """
-    Node 1: Run financial risk check using B Corp data and country-based trade analysis.
+    Node 1: Run financial risk check - extract country from Headquarters only.
 
     Process:
-    1. Get supplier country and B Corp URL from state
-    2. Scrape B Corp page for supplier data
+    1. Get supplier name and B Corp URL from state
+    2. Scrape B Corp page ONLY for Headquarters section to extract country
     3. Apply country-specific financial risk analysis based on US trade relationships
     4. Store in Pinecone and analyze with RAG
     5. Return financial score and details
 
-    Input: supplier_name, supplier_country, industry, b_corp_profile_url
+    Input: supplier_name, industry, b_corp_profile_url
     Output: financial_score, financial_info, risk_factors
     """
     try:
         supplier_name = state.get("supplier_name", "Unknown")
-        supplier_country = state.get("supplier_country", "")
         b_corp_url = state.get("b_corp_profile_url", "")
 
-        if not supplier_country:
-            ctx.logger.error("No supplier country provided for financial analysis")
+        if not b_corp_url:
+            ctx.logger.error("No B Corp URL provided for financial analysis")
             state["current_step"] = "financial_check_failed"
-            state["error_message"] = "No country information available"
+            state["error_message"] = "No B Corp URL available to extract country"
             state["financial_score"] = 0.0
             return state
 
-        # Run RAG query for financial analysis (includes B Corp scraping and country analysis)
+        # Run RAG query for financial analysis (extracts country from Headquarters ONLY)
+        ctx.logger.info(
+            f"Financial analysis will scrape B Corp Headquarters section to extract country..."
+        )
         rag_result = rag_system.query_financial_documents_sync(
             supplier_name=supplier_name,
-            country=supplier_country,
             industry=state.get("industry", ""),
             b_corp_url=b_corp_url,
         )
@@ -612,7 +676,7 @@ def financial_check_node(
         state["risk_factors"] = rag_result.get("risk_factors", [])
         state["current_step"] = "financial_check_complete"
 
-        ctx.logger.info(f"Financial analysis complete for {supplier_country}")
+        ctx.logger.info(f"Financial analysis complete")
         ctx.logger.info(f"Score: {state['financial_score']}/100")
         ctx.logger.info(f"Risk factors: {state['risk_factors']}")
 
@@ -884,7 +948,7 @@ def build_financial_workflow(
     Flow:
     START
         ↓
-    financial_check_node (Scrape B Corp + Apply country-based trade analysis + Run RAG)
+    financial_check_node (Extract country from Headquarters ONLY + Apply country-based analysis + Run RAG)
         ↓
     financial_router (Check score >= 60)
         ├─→ success_node (Score >= 60) → END

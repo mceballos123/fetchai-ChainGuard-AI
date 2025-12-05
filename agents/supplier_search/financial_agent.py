@@ -117,17 +117,18 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     Handle financial risk check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info, country, and industry from find_supplier_agent
+    1. Receive supplier info, B Corp URL, and industry from orchestrator
     2. Store previous state and update current state
     3. Create workflow state from request
     4. Run LangGraph financial workflow:
-       - financial_check_node: Scrape Trade War Tracker for country tariff/inflation data
+       - financial_check_node: Scrape B Corp page ONLY for Headquarters to extract country
+       - Apply country-specific financial analysis based on US trade relationships
        - financial_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
     5. Build FinancialResponse from workflow result
     6. Return response to orchestrator
 
-    Note: Country information is critical - used to query Trade War Tracker for tariff/inflation data
+    Note: Only extracts country from Headquarters section (e.g., "Catalonia, Spain" -> "Spain")
     """
     ctx.logger.info("")
     ctx.logger.info("=" * 70)
@@ -136,7 +137,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     ctx.logger.info(f"From: {sender}")
     ctx.logger.info(f"Request ID: {msg.request_id}")
     ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
-    ctx.logger.info(f"Supplier Country: {msg.supplier_country}")
+    ctx.logger.info(f"B Corp URL: {msg.b_corp_profile_url}")
     ctx.logger.info(f"Industry: {msg.industry}")
     ctx.logger.info("=" * 70)
 
@@ -152,7 +153,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     current_supplier_info = {
         "request_id": msg.request_id,
         "supplier_name": msg.supplier_name,
-        "supplier_country": msg.supplier_country,
+        "b_corp_profile_url": msg.b_corp_profile_url,
         "industry": msg.industry,
         "timestamp": msg.timestamp,
         "sender": sender,
@@ -168,7 +169,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
         ctx.logger.info("🔄 Starting LangGraph financial workflow...")
         ctx.logger.info(
-            f"Will analyze tariff/inflation data for: {msg.supplier_country}"
+            f"Will scrape B Corp Headquarters section ONLY to extract country"
         )
 
         # Create workflow state from request
@@ -182,7 +183,8 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             product_needed="",
             supplier_name=msg.supplier_name,
             supplier_location=None,
-            supplier_country=msg.supplier_country,  # Critical: Country for Trade War Tracker
+            supplier_country=None,  # Will be scraped from B Corp page
+            b_corp_profile_url=msg.b_corp_profile_url,  # Critical: B Corp URL to scrape country from
             retrieved_documents=None,
             rag_context=None,
             compliance_score=None,

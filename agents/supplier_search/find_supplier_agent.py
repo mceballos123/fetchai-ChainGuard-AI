@@ -217,83 +217,6 @@ async def search_b_corp_directory(
             if matches:
                 first_company = matches[0].strip()
 
-        # Extract country - CRITICAL for financial analysis
-        ctx.logger.info("🌍 Extracting supplier country...")
-
-        # Method 1: Look for Headquarters section
-        all_text = soup.get_text(separator="|", strip=True)
-
-        hq_patterns = [
-            r"Headquarters\|([^|]+)",
-            r"Headquarters([A-Za-z\s,]+(?:Argentina|Brazil|Chile|Colombia|Mexico|Peru|United States|Canada|United Kingdom|Germany|France|Spain|Italy|Australia|Japan|China|India))",
-        ]
-
-        for pattern in hq_patterns:
-            match = re.search(pattern, all_text, re.IGNORECASE)
-            if match:
-                headquarters_text = match.group(1).strip()
-                ctx.logger.info(f"   Found Headquarters: {headquarters_text}")
-                company_country = extract_country_from_location(headquarters_text)
-                if company_country:
-                    ctx.logger.info(f"   ✅ Country: {company_country}")
-                    break
-
-        # Method 2: Search for known countries in context
-        if not company_country:
-            known_countries = [
-                ("Argentina", ["Buenos Aires", "Argentina"]),
-                ("Brazil", ["Brazil", "São Paulo"]),
-                ("Chile", ["Chile", "Santiago"]),
-                ("Colombia", ["Colombia", "Bogotá"]),
-                ("Mexico", ["Mexico", "México"]),
-                ("Peru", ["Peru", "Lima"]),
-                ("United States", ["United States", "USA"]),
-                ("Canada", ["Canada"]),
-                ("United Kingdom", ["United Kingdom", "UK"]),
-            ]
-
-            for country, keywords in known_countries:
-                for keyword in keywords:
-                    if keyword.lower() in html_content.lower():
-                        context_patterns = [
-                            rf"Headquarters[^<]*{keyword}",
-                            rf"{keyword}[^<]*Province",
-                            rf"Province[^<]*{keyword}",
-                        ]
-                        for ctx_pattern in context_patterns:
-                            if re.search(ctx_pattern, html_content, re.IGNORECASE):
-                                company_country = country
-                                ctx.logger.info(
-                                    f"   ✅ Country (via context): {country}"
-                                )
-                                break
-                        if company_country:
-                            break
-                if company_country:
-                    break
-
-        # Method 3: Search in visible text
-        if not company_country:
-            visible_text = soup.get_text()
-            for country in [
-                "Argentina",
-                "Brazil",
-                "Chile",
-                "Colombia",
-                "Mexico",
-                "Peru",
-                "United States",
-                "Canada",
-            ]:
-                if country in visible_text:
-                    company_country = country
-                    ctx.logger.info(f"   Found country in text: {country}")
-                    break
-
-        if not company_country:
-            company_country = "Unknown"
-            ctx.logger.warning("⚠️ Could not determine country - defaulting to Unknown")
-
         if not first_company:
             ctx.logger.warning("❌ Could not extract company name")
             return {
@@ -304,11 +227,11 @@ async def search_b_corp_directory(
                 "error": "No company found",
             }
 
-        ctx.logger.info(f"✅ Supplier: {first_company} from {company_country}")
+        ctx.logger.info(f"✅ Supplier: {first_company}")
 
         result = SupplierSearchResult(
             company_name=first_company,
-            location=company_country,  # COUNTRY for financial analysis
+            location="",  # Location will be scraped by individual agents if needed
             industry=category.title(),
             b_corp_profile_url=profile_url or search_url,
             description=f"B Corporation certified company specializing in {category}",

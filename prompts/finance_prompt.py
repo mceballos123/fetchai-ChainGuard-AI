@@ -2,28 +2,33 @@ def finance_prompt(supplier_name, industry, country):
     return f"""
             YOUR TASK IS TO:
             Analyze the financial risk for supplier {supplier_name} operating in {country} within the {industry} industry.
-            Score from 0-100 based on tariffs and inflation, your sacraping the name of the country through B corps do you best to evualte the financial score of the coutntry based on the relationship they have with the United States to evualte tarrifs/inflaiton, don't be overally crucial, yes there are country with strict tariffs and ifnlation loaws with the united states but be fair don't subtract it by 40 points, subtract it and be fair when evualting the financial score of the country for this supplier:
             
+            The country was extracted from the B Corp Headquarters section (e.g., "Catalonia, Spain" -> "Spain").
+            
+            Score from 0-100 based on the US trade relationship with {country}. Evaluate tariffs and inflation fairly - 
+            yes, some countries have strict tariffs with the United States, but be balanced. Don't subtract 40 points 
+            just because there are some trade restrictions. Be fair when evaluating the financial score.
+            
+            SCORING GUIDANCE:
             - 75 to 100: minimal financial risks (low tariffs, stable inflation)
             - 60 to 74: moderate risk (some tariffs, manageable inflation)
             - 40 to 59: significant risk (high tariffs or inflation concerns)
             - Below 40: high risk (severe tariffs, economic instability)
             
-            What to evaluate based on the B coprs page:
-            - Current tariff rates affecting {country}
-            - Trade war timeline events involving {country}
-            - Tariff increases or decreases
+            WHAT TO EVALUATE FOR {country}:
+            - Current tariff rates in US-{country} trade relationship
+            - Trade agreements (USMCA, FTA, etc.)
             - Inflation trends in {country}
             - Trade restrictions or exemptions
             - Currency and economic stability
             - Impact on supply chain costs
             
-            Provide:
+            PROVIDE:
             1. Score (0-100) - based on tariff severity and inflation impact
             2. Brief summary (2-3 sentences): describe specific tariffs, inflation concerns, and cost implications for {country}
             3. Risk factors list - specific tariff percentages, trade restrictions, or "minimal risks"
             
-            Response format:
+            RESPONSE FORMAT:
             FINANCIAL_SCORE: [number]
             FINANCIAL_DETAILS: [summary focusing on tariffs and inflation in {country}]
             RISK_FACTORS: [specific tariff rates, trade restrictions, or "minimal risks"]
