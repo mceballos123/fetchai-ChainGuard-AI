@@ -49,7 +49,9 @@ def load_performance_csv_data(product_category: str) -> List[Dict[str, Any]]:
     return filtered_data
 
 
-def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) -> Dict[str, Any]:
+def analyze_performance_data(
+    data: List[Dict[str, Any]], product_category: str
+) -> Dict[str, Any]:
     """
     Analyze performance data for weather, strikes, politics, and legal insights.
 
@@ -85,9 +87,13 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
 
     if not data:
         insights["weather_status"] = "UNKNOWN"
-        insights["weather_details"] = f"No data available for {product_category} products"
+        insights["weather_details"] = (
+            f"No data available for {product_category} products"
+        )
         insights["overall_risk"] = "UNKNOWN"
-        insights["alerts"].append(f"No {product_category} products found in performance data")
+        insights["alerts"].append(
+            f"No {product_category} products found in performance data"
+        )
         return insights
 
     # Analyze the data
@@ -150,7 +156,9 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
     avg_stock = total_stock / total_products if total_products > 0 else 0
     avg_lead_time = total_lead_time / total_products if total_products > 0 else 0
     avg_production = total_production / total_products if total_products > 0 else 0
-    avg_mfg_lead_time = total_mfg_lead_time / total_products if total_products > 0 else 0
+    avg_mfg_lead_time = (
+        total_mfg_lead_time / total_products if total_products > 0 else 0
+    )
     avg_mfg_cost = total_mfg_cost / total_products if total_products > 0 else 0
     avg_defect_rate = total_defect_rate / total_products if total_products > 0 else 0
 
@@ -166,14 +174,14 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
         insights["alerts"].append("Production slowdown - possible weather impact")
     elif avg_lead_time > 18:
         insights["weather_status"] = "MONITOR: DELAYS"
-            insights["weather_details"] = (
+        insights["weather_details"] = (
             f"Extended lead times ({avg_lead_time:.0f} days) for {product_category} products. "
             f"Possible weather-related transportation delays. Track shipping conditions."
         )
         insights["alerts"].append("Extended lead times - monitor weather conditions")
     else:
         insights["weather_status"] = "NORMAL"
-            insights["weather_details"] = (
+        insights["weather_details"] = (
             f"Production and logistics for {product_category} operating normally. "
             f"Avg production: {avg_production:.0f} units. Avg lead time: {avg_lead_time:.0f} days. "
             f"No weather-related disruptions detected."
@@ -189,7 +197,9 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
             f"Avg manufacturing lead time: {avg_mfg_lead_time:.0f} days. "
             f"Possible labor shortages or workforce constraints at supplier facilities."
         )
-        insights["alerts"].append("Extended manufacturing times - monitor labor conditions")
+        insights["alerts"].append(
+            "Extended manufacturing times - monitor labor conditions"
+        )
     elif avg_mfg_cost > 60:
         insights["strike_status"] = "MONITOR: COST PRESSURE"
         insights["strike_details"] = (
@@ -198,7 +208,7 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
         )
     else:
         insights["strike_status"] = "NO STRIKES"
-            insights["strike_details"] = (
+        insights["strike_details"] = (
             f"Manufacturing operations stable for {product_category}. "
             f"Avg manufacturing lead time: {avg_mfg_lead_time:.0f} days. "
             f"Avg manufacturing cost: ${avg_mfg_cost:.2f}. No labor disruptions reported."
@@ -223,7 +233,7 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
         )
     else:
         insights["political_status"] = "STABLE"
-            insights["political_details"] = (
+        insights["political_details"] = (
             f"Stock levels healthy ({avg_stock:.0f} avg) for {product_category}. "
             f"Avg order quantity: {total_order_qty / total_products:.0f} units. "
             f"Supply chain operating without political disruptions."
@@ -250,11 +260,11 @@ def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) 
         insights["alerts"].append("Multiple items pending inspection review")
     else:
         insights["legal_status"] = "COMPLIANT"
-            insights["legal_details"] = (
+        insights["legal_details"] = (
             f"{product_category.capitalize()} products meeting quality standards. "
             f"Pass: {pass_count}, Fail: {fail_count}, Pending: {pending_count}. "
             f"Avg defect rate: {avg_defect_rate:.2f}%. Regulatory compliance maintained."
-            )
+        )
 
     # Determine overall risk level
     alert_count = len(insights["alerts"])
@@ -332,21 +342,21 @@ async def handle_performance_request(
         insights = analyze_performance_data(performance_data, product_category)
 
         # Build response from analyzed insights
-            response = PerformanceResponse(
-                request_id=msg.request_id,
-                supplier_name=msg.supplier_name,
-                weather_status=insights["weather_status"],
-                weather_details=insights["weather_details"],
-                strike_status=insights["strike_status"],
-                strike_details=insights["strike_details"],
-                political_status=insights["political_status"],
-                political_details=insights["political_details"],
-                legal_status=insights["legal_status"],
-                legal_details=insights["legal_details"],
-                overall_risk_level=insights["overall_risk"],
-                alerts=insights.get("alerts", []),
-                timestamp="",
-            )
+        response = PerformanceResponse(
+            request_id=msg.request_id,
+            supplier_name=msg.supplier_name,
+            weather_status=insights["weather_status"],
+            weather_details=insights["weather_details"],
+            strike_status=insights["strike_status"],
+            strike_details=insights["strike_details"],
+            political_status=insights["political_status"],
+            political_details=insights["political_details"],
+            legal_status=insights["legal_status"],
+            legal_details=insights["legal_details"],
+            overall_risk_level=insights["overall_risk"],
+            alerts=insights.get("alerts", []),
+            timestamp="",
+        )
 
         ctx.logger.info("")
         ctx.logger.info("=" * 70)
