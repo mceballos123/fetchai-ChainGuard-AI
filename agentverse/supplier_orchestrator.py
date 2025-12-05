@@ -36,9 +36,120 @@ load_dotenv()
 
 SUPPLIER_ORCHESTRATOR_SEED = os.getenv("SUPPLIER_ORCHESTRATOR_SEED")
 
+
+def determine_product_category(user_query: str) -> str:
+    """
+    Determine the product category from the user query.
+
+    Maps business keywords to product categories:
+    - food: coffee, pizza, bakery, restaurant, tea, chocolate, food, grocery, cafe
+    - clothing: clothing, apparel, fashion, textile, garment, shoes, accessories
+    - electronics: technology, software, electronics, computer, phone, hardware
+
+    Args:
+        user_query: The user's search query
+
+    Returns:
+        Product category: "food", "clothing", or "electronics"
+    """
+    query_lower = user_query.lower()
+
+    # Food category keywords
+    food_keywords = [
+        "coffee",
+        "pizza",
+        "bakery",
+        "restaurant",
+        "tea",
+        "chocolate",
+        "food",
+        "grocery",
+        "cafe",
+        "catering",
+        "beverage",
+        "organic",
+        "farm",
+        "produce",
+        "meat",
+        "dairy",
+        "snack",
+        "juice",
+        "wine",
+        "beer",
+        "bread",
+        "pasta",
+        "sauce",
+        "spice",
+        "ingredient",
+    ]
+
+    # Clothing category keywords
+    clothing_keywords = [
+        "clothing",
+        "apparel",
+        "fashion",
+        "textile",
+        "garment",
+        "shoes",
+        "accessories",
+        "wear",
+        "fabric",
+        "leather",
+        "denim",
+        "cotton",
+        "wool",
+        "silk",
+        "uniform",
+        "sportswear",
+        "footwear",
+        "bag",
+        "hat",
+    ]
+
+    # Electronics category keywords
+    electronics_keywords = [
+        "technology",
+        "software",
+        "electronics",
+        "computer",
+        "phone",
+        "hardware",
+        "device",
+        "gadget",
+        "tech",
+        "digital",
+        "smart",
+        "appliance",
+        "machine",
+        "equipment",
+        "component",
+        "chip",
+    ]
+
+    # Check for matches
+    for keyword in food_keywords:
+        if keyword in query_lower:
+            return "food"
+
+    for keyword in clothing_keywords:
+        if keyword in query_lower:
+            return "clothing"
+
+    for keyword in electronics_keywords:
+        if keyword in query_lower:
+            return "electronics"
+
+    # Default to food if no match
+    return "food"
+
+
 # Supabase configuration for monitoring data storage
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Global Supabase client (initialized at startup)
+# Note: We use a global variable because ctx.storage only accepts JSON-serializable data
+supabase_client: Client | None = None
 
 supplier_orchestrator = Agent(
     name="supplier_orchestrator",
@@ -90,25 +201,30 @@ async def startup(ctx: Context):
     ctx.logger.info(f"Logistics Agent: {LOGISTICS_AGENT_ADDRESS}")
 
     # Initialize Supabase client for monitoring data storage
+    global supabase_client
+    ctx.logger.info(f"Supabase URL: {SUPABASE_URL}")
+    ctx.logger.info(f"Supabase Key: {SUPABASE_KEY[:20]}..." if SUPABASE_KEY else "None")
     if SUPABASE_URL and SUPABASE_KEY:
         try:
-            supabase_client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-            ctx.storage.set("supabase_client", supabase_client)
+            supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
             ctx.logger.info("✅ Supabase client initialized successfully")
         except Exception as e:
             ctx.logger.error(f"❌ Failed to initialize Supabase client: {e}")
-            ctx.storage.set("supabase_client", None)
+            supabase_client = None
     else:
         ctx.logger.warning(
             "⚠️ Supabase credentials not found - monitoring data will not be stored"
         )
-        ctx.storage.set("supabase_client", None)
+        supabase_client = None
 
     ctx.storage.set("active_sessions", {})
     ctx.storage.set("approved_suppliers", [])
     ctx.storage.set(
         "selected_supplier", None
     )  # Track the supplier selected for monitoring
+    ctx.storage.set(
+        "selected_product_category", None
+    )  # Track the product category (food, clothing, electronics)
 
     # Storage for tracking responses from both agents
     ctx.storage.set("pending_responses", {})
@@ -219,8 +335,9 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         )
         ctx.logger.info("=" * 70)
 
-        # Get the selected supplier (from the find_supplier phase)
+        # Get the selected supplier and product category (from the find_supplier phase)
         selected_supplier = ctx.storage.get("selected_supplier")
+        product_category = ctx.storage.get("selected_product_category") or "food"
 
         if not selected_supplier:
             ctx.logger.warning("No selected supplier available for monitoring")
@@ -257,14 +374,16 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
         ctx.storage.set("pending_responses", pending_responses)
 
         try:
-            # Send to Performance Agent with the selected supplier
+            # Send to Performance Agent with the selected supplier and product category
             ctx.logger.info(
                 f"Sending to Performance Agent: {PERFORMANCE_AGENT_ADDRESS}"
             )
             ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
+            ctx.logger.info(f"Product category: {product_category}")
             performance_request = PerformanceRequest(
                 request_id=msg_id,
                 supplier_name=selected_supplier,
+                product_category=product_category,
                 timestamp="",
             )
 
@@ -272,12 +391,14 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
             ctx.logger.info(f"PerformanceRequest sent to Performance Agent")
 
-            # Send to Demand Agent with the selected supplier
+            # Send to Demand Agent with the selected supplier and product category
             ctx.logger.info(f"Sending to Demand Agent: {DEMAND_AGENT_ADDRESS}")
             ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
+            ctx.logger.info(f"Product category: {product_category}")
             demand_request = DemandRequest(
                 request_id=msg_id,
                 supplier_name=selected_supplier,
+                product_category=product_category,
                 timestamp="",
             )
 
@@ -285,12 +406,14 @@ async def handle_chat_message(ctx: Context, sender: str, msg: ChatMessage):
 
             ctx.logger.info(f"DemandRequest sent to Demand Agent")
 
-            # Send to Logistics Agent with the selected supplier
+            # Send to Logistics Agent with the selected supplier and product category
             ctx.logger.info(f"Sending to Logistics Agent: {LOGISTICS_AGENT_ADDRESS}")
             ctx.logger.info(f"Monitoring supplier: {selected_supplier}")
+            ctx.logger.info(f"Product category: {product_category}")
             logistics_request = LogisticsRequest(
                 request_id=msg_id,
                 supplier_name=selected_supplier,
+                product_category=product_category,
                 timestamp="",
             )
 
@@ -800,9 +923,15 @@ async def handle_find_supplier_response(
 
         # Store the selected supplier for monitoring
         ctx.storage.set("selected_supplier", best_supplier.company_name)
+
+        # Determine and store product category from user query
+        product_category = determine_product_category(user_query)
+        ctx.storage.set("selected_product_category", product_category)
+
         ctx.logger.info(
             f"✅ Stored supplier for monitoring: {best_supplier.company_name}"
         )
+        ctx.logger.info(f"✅ Product category determined: {product_category}")
 
         # NOW FORWARD TO COMPLIANCE AGENT FIRST (SEQUENTIAL PROCESSING)
         ctx.logger.info("")
@@ -1258,9 +1387,9 @@ async def store_monitoring_data_in_supabase(
     Returns:
         bool: True if successful, False otherwise
     """
-    try:
-        supabase_client = ctx.storage.get("supabase_client")
+    global supabase_client
 
+    try:
         if not supabase_client:
             ctx.logger.warning(
                 "⚠️ Supabase client not initialized - skipping data storage"

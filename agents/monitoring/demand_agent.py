@@ -1,7 +1,7 @@
 from uagents import Agent, Context, Protocol
 import os
-import json
-from typing import Dict, Any, Optional
+import csv
+from typing import Dict, Any, List
 
 # Import models
 from models.demand import DemandRequest, DemandResponse
@@ -19,59 +19,51 @@ demand_agent = Agent(
 
 demand_protocol = Protocol(name="demand_protocol", version="1.0")
 
-# Paths to supplier data files
-COMPLIANCE_FILES_PATH = os.path.join(
-    os.path.dirname(__file__), "../../compliance_files"
-)
-FINANCIAL_FILES_PATH = os.path.join(os.path.dirname(__file__), "../../financial_files")
-RISK_MANAGEMENT_FILES_PATH = os.path.join(
-    os.path.dirname(__file__), "../../risk_management_files"
+# Path to demand monitoring CSV data
+DEMAND_CSV_PATH = os.path.join(
+    os.path.dirname(__file__), "../../data_for_monitor/demand_monitoring_data.csv"
 )
 
 
-def load_supplier_file(supplier_name: str, file_path: str) -> Optional[str]:
+def load_demand_csv_data(product_category: str) -> List[Dict[str, Any]]:
     """
-    Load supplier data from a file.
+    Load demand monitoring data from CSV and filter by product category.
 
     Args:
-        supplier_name: The name of the supplier (converted to lowercase with underscores)
-        file_path: The directory path where the file is located
+        product_category: The product type to filter by (food, clothing, electronics)
 
     Returns:
-        The file contents as a string, or None if file not found
+        List of dictionaries containing filtered demand data
     """
-    # Convert supplier name to file format (e.g., "Green Valley" -> "green_valley")
-    file_name = f"{supplier_name.lower().replace(' ', '_')}.txt"
-    full_path = os.path.join(file_path, file_name)
+    filtered_data = []
 
     try:
-        if os.path.exists(full_path):
-            with open(full_path, "r") as f:
-                return f.read()
-        else:
-            return None
+        with open(DEMAND_CSV_PATH, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("Product type", "").lower() == product_category.lower():
+                    filtered_data.append(row)
     except Exception as e:
-        return None
+        print(f"Error loading demand CSV: {e}")
+
+    return filtered_data
 
 
-def extract_demand_insights(
-    compliance_data: str, risk_data: str, financial_data: str
+def analyze_demand_data(
+    data: List[Dict[str, Any]], product_category: str
 ) -> Dict[str, Any]:
     """
-    Extract demand forecast insights from supplier files using the demand prompt guidelines.
+    Analyze demand data for delays, quality, and shipping insights.
 
-    The demand_prompt directs the agent to monitor:
-    - DELAYS in delivery and operations
-    - QUALITY tracking and control
-    - SHIPPING tracking and logistics
+    CSV columns: Product type, SKU, Price, Availability, Number of products sold,
+                 Revenue generated, Customer demographics
 
     Args:
-        compliance_data: Contents of compliance file
-        risk_data: Contents of risk management file
-        financial_data: Contents of financial file
+        data: List of filtered demand data rows
+        product_category: The product category being analyzed
 
     Returns:
-        Dictionary with demand forecast insights
+        Dictionary with demand insights
     """
     insights = {
         "delay_status": "ON TIME",
@@ -84,106 +76,126 @@ def extract_demand_insights(
         "overall_performance": "EXCELLENT",
     }
 
-    # Extract delay-related information from all data sources
-    if risk_data:
-        if "delay" in risk_data.lower() or "late" in risk_data.lower():
-            insights["delay_status"] = "DELAYS DETECTED"
-            insights["delay_details"] = (
-                "Historical delays detected in risk assessment. Monitor delivery schedules closely for potential timing issues."
-            )
-            insights["alerts"].append("Delivery delay risk identified")
+    if not data:
+        insights["delay_status"] = "UNKNOWN"
+        insights["delay_details"] = f"No data available for {product_category} products"
+        insights["overall_performance"] = "UNKNOWN"
+        insights["alerts"].append(
+            f"No {product_category} products found in monitoring data"
+        )
+        return insights
 
-        if "seasonal" in risk_data.lower():
-            if insights["delay_details"]:
-                insights[
-                    "delay_details"
-                ] += " Seasonal fluctuations may impact delivery timelines."
-            else:
-                insights["delay_details"] = (
-                    "Seasonal variations may affect delivery schedules. Plan ahead for peak periods."
-                )
-            insights["alerts"].append("Seasonal delivery variations expected")
+    # Analyze the data
+    total_products = len(data)
+    total_sold = 0
+    total_revenue = 0
+    low_availability_count = 0
+    high_price_count = 0
 
-    if financial_data:
-        if "cost" in financial_data.lower() and "increase" in financial_data.lower():
-            insights[
-                "delay_details"
-            ] += " Cost increases may impact delivery schedules and priorities."
-            if "Delivery delay risk identified" not in insights["alerts"]:
-                insights["delay_status"] = "MONITOR: COST IMPACT"
+    for row in data:
+        try:
+            availability = int(row.get("Availability", 0))
+            products_sold = int(row.get("Number of products sold", 0))
+            revenue = float(row.get("Revenue generated", 0))
+            price = float(row.get("Price", 0))
 
-    # Extract shipping and logistics information
-    if risk_data:
-        if "transport" in risk_data.lower() or "logistics" in risk_data.lower():
-            insights["shipping_status"] = "MONITOR: LOGISTICS"
-            insights["shipping_details"] = (
-                "Logistics factors detected in risk profile. Monitor transportation routes and carrier performance."
-            )
-            insights["alerts"].append("Logistics monitoring required")
+            total_sold += products_sold
+            total_revenue += revenue
 
-        if "distance" in risk_data.lower() or "location" in risk_data.lower():
-            if insights["shipping_details"]:
-                insights[
-                    "shipping_details"
-                ] += " Geographic distance may affect shipping times and costs."
-            else:
-                insights["shipping_details"] = (
-                    "Geographic factors may impact shipping schedules. Track transit times carefully."
-                )
-            insights["alerts"].append("Geographic shipping considerations")
+            # Check for low availability (potential delays)
+            if availability < 30:
+                low_availability_count += 1
 
-    # Extract quality tracking information
-    if compliance_data:
-        if "quality" in compliance_data.lower():
-            if "poor" in compliance_data.lower() or "low" in compliance_data.lower():
-                insights["quality_status"] = "CONCERNS IDENTIFIED"
-                insights["quality_details"] = (
-                    "Quality concerns noted in compliance records. Implement enhanced quality control measures."
-                )
-                insights["alerts"].append("Quality control enhancement needed")
-            else:
-                insights["quality_status"] = "GOOD"
-                insights["quality_details"] = (
-                    "Quality standards maintained per compliance records. Continue regular monitoring."
-                )
+            # Check for high-priced items (quality indicator)
+            if price > 70:
+                high_price_count += 1
 
-        if "certification" in compliance_data.lower():
-            if insights["quality_details"]:
-                insights[
-                    "quality_details"
-                ] += " Quality certifications are active and maintained."
-            else:
-                insights["quality_details"] = (
-                    "Quality certifications verified. Standards are being met."
-                )
+        except (ValueError, TypeError):
+            continue
 
-    if risk_data:
-        if "quality" in risk_data.lower() or "defect" in risk_data.lower():
-            if "CONCERNS IDENTIFIED" not in insights["quality_status"]:
-                insights["quality_status"] = "MONITOR: QUALITY VARIANCE"
-            insights[
-                "quality_details"
-            ] += (
-                " Historical quality variance detected. Maintain strict quality checks."
-            )
-            insights["alerts"].append("Quality variance monitoring required")
+    avg_sold = total_sold / total_products if total_products > 0 else 0
+    avg_revenue = total_revenue / total_products if total_products > 0 else 0
 
-    # Determine overall performance based on extracted information
+    # Determine delay status based on availability
+    low_availability_ratio = (
+        low_availability_count / total_products if total_products > 0 else 0
+    )
+    if low_availability_ratio > 0.5:
+        insights["delay_status"] = "DELAYS DETECTED"
+        insights["delay_details"] = (
+            f"High demand detected: {low_availability_count}/{total_products} {product_category} products "
+            f"have low availability (<30%). Average products sold: {avg_sold:.0f}. "
+            f"Consider restocking to meet demand."
+        )
+        insights["alerts"].append(
+            f"Low availability on {low_availability_count} {product_category} items"
+        )
+    elif low_availability_ratio > 0.3:
+        insights["delay_status"] = "MONITOR: AVAILABILITY"
+        insights["delay_details"] = (
+            f"Moderate demand pressure: {low_availability_count}/{total_products} {product_category} products "
+            f"have limited availability. Monitor closely for potential delays."
+        )
+        insights["alerts"].append("Moderate availability constraints detected")
+    else:
+        insights["delay_status"] = "ON TIME"
+        insights["delay_details"] = (
+            f"Good availability across {product_category} products. {total_products} SKUs monitored "
+            f"with average revenue of ${avg_revenue:.2f} per product."
+        )
+
+    # Determine shipping status based on sales volume
+    if avg_sold > 500:
+        insights["shipping_status"] = "HIGH VOLUME"
+        insights["shipping_details"] = (
+            f"High shipping volume for {product_category}: Average {avg_sold:.0f} units sold per SKU. "
+            f"Ensure logistics capacity can handle demand."
+        )
+        insights["alerts"].append("High shipping volume - monitor logistics capacity")
+    elif avg_sold > 300:
+        insights["shipping_status"] = "MODERATE VOLUME"
+        insights["shipping_details"] = (
+            f"Moderate shipping activity for {product_category}: Average {avg_sold:.0f} units per SKU. "
+            f"Shipping operations within normal parameters."
+        )
+    else:
+        insights["shipping_status"] = "NORMAL"
+        insights["shipping_details"] = (
+            f"Standard shipping volume for {product_category}: Average {avg_sold:.0f} units per SKU. "
+            f"No shipping concerns detected."
+        )
+
+    # Determine quality status based on price distribution (premium products = quality focus)
+    quality_ratio = high_price_count / total_products if total_products > 0 else 0
+    if quality_ratio > 0.3:
+        insights["quality_status"] = "PREMIUM"
+        insights["quality_details"] = (
+            f"Premium {product_category} portfolio: {high_price_count}/{total_products} products are high-value items. "
+            f"Maintain strict quality control for premium products."
+        )
+    elif quality_ratio > 0.1:
+        insights["quality_status"] = "GOOD"
+        insights["quality_details"] = (
+            f"Balanced {product_category} portfolio with mix of price points. "
+            f"Quality standards being maintained across product range."
+        )
+    else:
+        insights["quality_status"] = "STANDARD"
+        insights["quality_details"] = (
+            f"Standard {product_category} products in portfolio. "
+            f"Regular quality monitoring recommended."
+        )
+
+    # Determine overall performance
     alert_count = len(insights["alerts"])
-    critical_issues = [
-        alert
-        for alert in insights["alerts"]
-        if "delay" in alert.lower() or "quality control enhancement" in alert.lower()
-    ]
-
     if alert_count == 0:
         insights["overall_performance"] = "EXCELLENT"
-    elif len(critical_issues) > 0 or alert_count > 3:
-        insights["overall_performance"] = "POOR"
-    elif alert_count > 2:
+    elif alert_count == 1:
+        insights["overall_performance"] = "GOOD"
+    elif alert_count == 2:
         insights["overall_performance"] = "FAIR"
     else:
-        insights["overall_performance"] = "GOOD"
+        insights["overall_performance"] = "POOR"
 
     return insights
 
@@ -191,6 +203,9 @@ def extract_demand_insights(
 @demand_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent on startup"""
+    ctx.logger.info("Demand Agent starting up...")
+    ctx.logger.info(f"Agent address: {demand_agent.address}")
+
     # Load demand forecast prompt
     ctx.storage.set("demand_prompt", DEMAND_FORECASE_PROMPT)
 
@@ -203,11 +218,13 @@ async def startup(ctx: Context):
         },
     )
 
+    ctx.logger.info("Demand Agent ready to receive requests!")
+
 
 @demand_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    pass
+    ctx.logger.info("Demand Agent shutting down...")
 
 
 @demand_protocol.on_message(model=DemandRequest, replies=DemandResponse)
@@ -216,54 +233,56 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
     Handle demand forecast request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier name from orchestrator
-    2. Load supplier data from compliance, financial, and risk files
-    3. Extract demand insights based on demand_prompt guidelines
+    1. Receive supplier name and product category from orchestrator
+    2. Load demand CSV data and filter by product category
+    3. Analyze filtered data for delays, quality, and shipping insights
     4. Return demand forecast update to orchestrator
     """
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📥 DEMAND AGENT: RECEIVED REQUEST")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
+    ctx.logger.info(f"Product Category: {msg.product_category}")
+    ctx.logger.info("=" * 70)
+
     try:
-        # Load supplier data from files
-        compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
-        risk_data = load_supplier_file(msg.supplier_name, RISK_MANAGEMENT_FILES_PATH)
-        financial_data = load_supplier_file(msg.supplier_name, FINANCIAL_FILES_PATH)
+        # Load and filter CSV data by product category
+        product_category = msg.product_category or "food"
+        ctx.logger.info(f"Loading demand data for category: {product_category}")
 
-        # Check if supplier files exist
-        if not compliance_data and not risk_data and not financial_data:
+        demand_data = load_demand_csv_data(product_category)
+        ctx.logger.info(f"Found {len(demand_data)} {product_category} products")
 
-            # Return response indicating supplier not found
-            response = DemandResponse(
-                request_id=msg.request_id,
-                supplier_name=msg.supplier_name,
-                delay_status="UNKNOWN",
-                delay_details=f"No demand forecast data available for {msg.supplier_name}. This supplier may not be approved for monitoring yet.",
-                shipping_status="UNKNOWN",
-                shipping_details="No data available",
-                quality_status="UNKNOWN",
-                quality_details="No data available",
-                overall_performance="UNKNOWN",
-                alerts=["Supplier not found in monitoring system"],
-                timestamp="",
-            )
-        else:
-            # Extract demand insights from supplier data
-            insights = extract_demand_insights(
-                compliance_data or "", risk_data or "", financial_data or ""
-            )
+        # Analyze the filtered data
+        insights = analyze_demand_data(demand_data, product_category)
 
-            # Build response from extracted insights
-            response = DemandResponse(
-                request_id=msg.request_id,
-                supplier_name=msg.supplier_name,
-                delay_status=insights["delay_status"],
-                delay_details=insights["delay_details"],
-                shipping_status=insights["shipping_status"],
-                shipping_details=insights["shipping_details"],
-                quality_status=insights["quality_status"],
-                quality_details=insights["quality_details"],
-                overall_performance=insights["overall_performance"],
-                alerts=insights.get("alerts", []),
-                timestamp="",
-            )
+        # Build response from analyzed insights
+        response = DemandResponse(
+            request_id=msg.request_id,
+            supplier_name=msg.supplier_name,
+            delay_status=insights["delay_status"],
+            delay_details=insights["delay_details"],
+            shipping_status=insights["shipping_status"],
+            shipping_details=insights["shipping_details"],
+            quality_status=insights["quality_status"],
+            quality_details=insights["quality_details"],
+            overall_performance=insights["overall_performance"],
+            alerts=insights.get("alerts", []),
+            timestamp="",
+        )
+
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("📤 DEMAND AGENT: SENDING RESPONSE")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info(f"To: {sender}")
+        ctx.logger.info(f"Overall Performance: {response.overall_performance}")
+        ctx.logger.info(f"Delay Status: {response.delay_status}")
+        ctx.logger.info(f"Alerts: {len(response.alerts)}")
+        ctx.logger.info("=" * 70)
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)

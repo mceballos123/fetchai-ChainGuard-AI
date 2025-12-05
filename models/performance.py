@@ -7,6 +7,7 @@ class PerformanceRequest(Model):
 
     request_id: str
     supplier_name: str
+    product_category: str = ""  # food, clothing, electronics - determined from user query
     timestamp: str = ""
 
 

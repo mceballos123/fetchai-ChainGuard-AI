@@ -1,7 +1,7 @@
 from uagents import Agent, Context, Protocol
 import os
-import json
-from typing import Dict, Any, Optional
+import csv
+from typing import Dict, Any, List
 
 # Import models
 from models.performance import PerformanceRequest, PerformanceResponse
@@ -19,60 +19,56 @@ performance_agent = Agent(
 
 performance_protocol = Protocol(name="performance_protocol", version="1.0")
 
-# Paths to supplier data files
-COMPLIANCE_FILES_PATH = os.path.join(
-    os.path.dirname(__file__), "../../compliance_files"
-)
-FINANCIAL_FILES_PATH = os.path.join(os.path.dirname(__file__), "../../financial_files")
-RISK_MANAGEMENT_FILES_PATH = os.path.join(
-    os.path.dirname(__file__), "../../risk_management_files"
+# Path to performance monitoring CSV data
+PERFORMANCE_CSV_PATH = os.path.join(
+    os.path.dirname(__file__), "../../data_for_monitor/performance_monitoring_data.csv"
 )
 
 
-def load_supplier_file(supplier_name: str, file_path: str) -> Optional[str]:
+def load_performance_csv_data(product_category: str) -> List[Dict[str, Any]]:
     """
-    Load supplier data from a file.
+    Load performance monitoring data from CSV and filter by product category.
 
     Args:
-        supplier_name: The name of the supplier (converted to lowercase with underscores)
-        file_path: The directory path where the file is located
+        product_category: The product type to filter by (food, clothing, electronics)
 
     Returns:
-        The file contents as a string, or None if file not found
+        List of dictionaries containing filtered performance data
     """
-    # Convert supplier name to file format (e.g., "Green Valley" -> "green_valley")
-    file_name = f"{supplier_name.lower().replace(' ', '_')}.txt"
-    full_path = os.path.join(file_path, file_name)
+    filtered_data = []
 
     try:
-        if os.path.exists(full_path):
-            with open(full_path, "r") as f:
-                return f.read()
-        else:
-            return None
+        with open(PERFORMANCE_CSV_PATH, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if row.get("Product type", "").lower() == product_category.lower():
+                    filtered_data.append(row)
     except Exception as e:
-        return None
+        print(f"Error loading performance CSV: {e}")
+
+    return filtered_data
 
 
-def extract_monitoring_insights(
-    compliance_data: str, risk_data: str, financial_data: str
-) -> Dict[str, Any]:
+def analyze_performance_data(data: List[Dict[str, Any]], product_category: str) -> Dict[str, Any]:
     """
-    Extract monitoring insights from supplier files using the performance prompt guidelines.
+    Analyze performance data for weather, strikes, politics, and legal insights.
 
-    The performance_prompt directs the agent to monitor:
-    - WEATHER conditions
-    - Strikes and labor issues
-    - Political environment
-    - New laws and regulations
+    CSV columns: Product type, SKU, Stock levels, Lead times, Order quantities,
+                 Production volumes, Manufacturing lead time, Manufacturing costs,
+                 Inspection results, Defect rates
+
+    We use this production/manufacturing data to simulate external factors:
+    - Weather: Derived from production volumes and lead times
+    - Strikes: Derived from manufacturing lead times and costs
+    - Political: Derived from stock levels and order quantities
+    - Legal: Derived from inspection results and defect rates
 
     Args:
-        compliance_data: Contents of compliance file
-        risk_data: Contents of risk management file
-        financial_data: Contents of financial file
+        data: List of filtered performance data rows
+        product_category: The product category being analyzed
 
     Returns:
-        Dictionary with monitoring insights
+        Dictionary with performance monitoring insights
     """
     insights = {
         "weather_status": "NORMAL",
@@ -87,72 +83,186 @@ def extract_monitoring_insights(
         "overall_risk": "LOW",
     }
 
-    # Extract weather-related information from risk data
-    if risk_data:
-        if "flood" in risk_data.lower():
-            insights["weather_status"] = "RISK: FLOOD"
-            insights["weather_details"] = (
-                "Supplier location has flood risk history. Monitor weather alerts and seasonal conditions."
-            )
-            insights["alerts"].append("Flood risk detected in supplier location")
-        if "drought" in risk_data.lower() or "water restriction" in risk_data.lower():
-            insights["weather_status"] = "RISK: DROUGHT"
-            insights["weather_details"] = (
-                "Drought conditions or water restrictions possible. Monitor water availability and irrigation status."
-            )
-            if "RISK: FLOOD" not in insights["weather_status"]:
-                insights["alerts"].append("Drought/water restriction risk identified")
-        if (
-            "temperature" in risk_data.lower()
-            or "freeze" in risk_data.lower()
-            or "heat wave" in risk_data.lower()
-        ):
-            insights[
-                "weather_details"
-            ] += " Temperature extremes possible. Monitor seasonal forecasts."
-            insights["alerts"].append("Temperature extreme risk identified")
+    if not data:
+        insights["weather_status"] = "UNKNOWN"
+        insights["weather_details"] = f"No data available for {product_category} products"
+        insights["overall_risk"] = "UNKNOWN"
+        insights["alerts"].append(f"No {product_category} products found in performance data")
+        return insights
 
-    # Extract labor/strike information
-    if risk_data:
-        if "labor" in risk_data.lower() or "workforce" in risk_data.lower():
-            insights["strike_status"] = "MONITOR: LABOR CHANGES"
+    # Analyze the data
+    total_products = len(data)
+    total_stock = 0
+    total_lead_time = 0
+    total_order_qty = 0
+    total_production = 0
+    total_mfg_lead_time = 0
+    total_mfg_cost = 0
+    total_defect_rate = 0
+
+    # Track inspection results
+    pass_count = 0
+    fail_count = 0
+    pending_count = 0
+
+    low_stock_count = 0
+    high_defect_count = 0
+    long_mfg_lead_count = 0
+
+    for row in data:
+        try:
+            stock_level = int(row.get("Stock levels", 0))
+            lead_time = int(row.get("Lead times", 0))
+            order_qty = int(row.get("Order quantities", 0))
+            production = int(row.get("Production volumes", 0))
+            mfg_lead_time = int(row.get("Manufacturing lead time", 0))
+            mfg_cost = float(row.get("Manufacturing costs", 0))
+            defect_rate = float(row.get("Defect rates", 0))
+            inspection = row.get("Inspection results", "Pending")
+
+            total_stock += stock_level
+            total_lead_time += lead_time
+            total_order_qty += order_qty
+            total_production += production
+            total_mfg_lead_time += mfg_lead_time
+            total_mfg_cost += mfg_cost
+            total_defect_rate += defect_rate
+
+            # Track inspection results
+            if inspection.lower() == "pass":
+                pass_count += 1
+            elif inspection.lower() == "fail":
+                fail_count += 1
+            else:
+                pending_count += 1
+
+            # Track problem areas
+            if stock_level < 20:
+                low_stock_count += 1
+            if defect_rate > 3.0:
+                high_defect_count += 1
+            if mfg_lead_time > 20:
+                long_mfg_lead_count += 1
+
+        except (ValueError, TypeError):
+            continue
+
+    avg_stock = total_stock / total_products if total_products > 0 else 0
+    avg_lead_time = total_lead_time / total_products if total_products > 0 else 0
+    avg_production = total_production / total_products if total_products > 0 else 0
+    avg_mfg_lead_time = total_mfg_lead_time / total_products if total_products > 0 else 0
+    avg_mfg_cost = total_mfg_cost / total_products if total_products > 0 else 0
+    avg_defect_rate = total_defect_rate / total_products if total_products > 0 else 0
+
+    # WEATHER STATUS: Based on production volumes and lead times
+    # (simulating weather impact on supply chain)
+    if avg_production < 400:
+        insights["weather_status"] = "RISK: PRODUCTION SLOWDOWN"
+        insights["weather_details"] = (
+            f"Low production volumes ({avg_production:.0f} avg) detected for {product_category}. "
+            f"This may indicate weather-related supply chain disruptions or seasonal factors. "
+            f"Monitor weather conditions in supplier regions."
+        )
+        insights["alerts"].append("Production slowdown - possible weather impact")
+    elif avg_lead_time > 18:
+        insights["weather_status"] = "MONITOR: DELAYS"
+            insights["weather_details"] = (
+            f"Extended lead times ({avg_lead_time:.0f} days) for {product_category} products. "
+            f"Possible weather-related transportation delays. Track shipping conditions."
+        )
+        insights["alerts"].append("Extended lead times - monitor weather conditions")
+    else:
+        insights["weather_status"] = "NORMAL"
+            insights["weather_details"] = (
+            f"Production and logistics for {product_category} operating normally. "
+            f"Avg production: {avg_production:.0f} units. Avg lead time: {avg_lead_time:.0f} days. "
+            f"No weather-related disruptions detected."
+        )
+
+    # STRIKE STATUS: Based on manufacturing lead times and costs
+    # (simulating labor issues)
+    long_mfg_ratio = long_mfg_lead_count / total_products if total_products > 0 else 0
+    if long_mfg_ratio > 0.4:
+        insights["strike_status"] = "RISK: LABOR CONSTRAINTS"
+        insights["strike_details"] = (
+            f"{long_mfg_lead_count}/{total_products} {product_category} items have extended manufacturing times. "
+            f"Avg manufacturing lead time: {avg_mfg_lead_time:.0f} days. "
+            f"Possible labor shortages or workforce constraints at supplier facilities."
+        )
+        insights["alerts"].append("Extended manufacturing times - monitor labor conditions")
+    elif avg_mfg_cost > 60:
+        insights["strike_status"] = "MONITOR: COST PRESSURE"
+        insights["strike_details"] = (
+            f"High manufacturing costs (${avg_mfg_cost:.2f} avg) for {product_category}. "
+            f"May indicate labor cost increases or wage negotiations. Monitor supplier labor relations."
+        )
+    else:
+        insights["strike_status"] = "NO STRIKES"
             insights["strike_details"] = (
-                "Workforce fluctuations detected. Monitor seasonal staffing levels and labor availability."
-            )
-            insights["alerts"].append("Labor availability constraints noted")
+            f"Manufacturing operations stable for {product_category}. "
+            f"Avg manufacturing lead time: {avg_mfg_lead_time:.0f} days. "
+            f"Avg manufacturing cost: ${avg_mfg_cost:.2f}. No labor disruptions reported."
+        )
 
-    # Extract political/regulatory information
-    if compliance_data:
-        if (
-            "certification" in compliance_data.lower()
-            or "regulation" in compliance_data.lower()
-        ):
+    # POLITICAL STATUS: Based on stock levels and order quantities
+    # (simulating supply stability)
+    low_stock_ratio = low_stock_count / total_products if total_products > 0 else 0
+    if low_stock_ratio > 0.4:
+        insights["political_status"] = "UNSTABLE"
+        insights["political_details"] = (
+            f"Low stock levels across {low_stock_count}/{total_products} {product_category} products. "
+            f"May indicate supply chain disruptions due to trade policies or regional instability. "
+            f"Review supplier country situations."
+        )
+        insights["alerts"].append("Low stock levels - review supply chain stability")
+    elif avg_stock < 40:
+        insights["political_status"] = "MONITOR"
+        insights["political_details"] = (
+            f"Below-average stock levels ({avg_stock:.0f}) for {product_category}. "
+            f"Monitor political and trade developments in supplier regions."
+        )
+    else:
+        insights["political_status"] = "STABLE"
             insights["political_details"] = (
-                "Regulatory compliance requirements active. Monitor certification status and regulatory changes."
-            )
-            if "RISK" in compliance_data:
-                insights["alerts"].append("Regulatory monitoring required")
+            f"Stock levels healthy ({avg_stock:.0f} avg) for {product_category}. "
+            f"Avg order quantity: {total_order_qty / total_products:.0f} units. "
+            f"Supply chain operating without political disruptions."
+        )
 
-    # Extract legal/regulatory from risk data
-    if risk_data:
-        if (
-            "permit" in risk_data.lower()
-            or "compliance" in risk_data.lower()
-            or "fsma" in risk_data.lower()
-        ):
-            insights["legal_status"] = "MONITOR: PERMITS/COMPLIANCE"
+    # LEGAL STATUS: Based on inspection results and defect rates
+    # (simulating regulatory compliance)
+    fail_ratio = fail_count / total_products if total_products > 0 else 0
+    if fail_ratio > 0.3 or avg_defect_rate > 3.0:
+        insights["legal_status"] = "COMPLIANCE RISK"
+        insights["legal_details"] = (
+            f"Quality concerns: {fail_count}/{total_products} {product_category} items failed inspection. "
+            f"Avg defect rate: {avg_defect_rate:.2f}%. High defects on {high_defect_count} items. "
+            f"Review quality standards and regulatory compliance."
+        )
+        insights["alerts"].append("High failure rate - review regulatory compliance")
+    elif pending_count > pass_count:
+        insights["legal_status"] = "PENDING REVIEW"
+        insights["legal_details"] = (
+            f"Many {product_category} items pending inspection ({pending_count}/{total_products}). "
+            f"Pass rate: {pass_count}, Fail rate: {fail_count}. "
+            f"Expedite quality reviews to ensure compliance."
+        )
+        insights["alerts"].append("Multiple items pending inspection review")
+    else:
+        insights["legal_status"] = "COMPLIANT"
             insights["legal_details"] = (
-                "Active permit reviews and compliance audits in progress. Monitor regulatory changes and permit renewals."
+            f"{product_category.capitalize()} products meeting quality standards. "
+            f"Pass: {pass_count}, Fail: {fail_count}, Pending: {pending_count}. "
+            f"Avg defect rate: {avg_defect_rate:.2f}%. Regulatory compliance maintained."
             )
-            insights["alerts"].append("Permit and regulatory compliance review ongoing")
 
-    # Determine overall risk level based on extracted information
+    # Determine overall risk level
     alert_count = len(insights["alerts"])
     if alert_count == 0:
         insights["overall_risk"] = "LOW"
-    elif alert_count <= 2:
+    elif alert_count == 1:
         insights["overall_risk"] = "MEDIUM"
-    elif alert_count <= 4:
+    elif alert_count <= 3:
         insights["overall_risk"] = "HIGH"
     else:
         insights["overall_risk"] = "CRITICAL"
@@ -163,6 +273,9 @@ def extract_monitoring_insights(
 @performance_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent on startup"""
+    ctx.logger.info("Performance Agent starting up...")
+    ctx.logger.info(f"Agent address: {performance_agent.address}")
+
     # Load performance prompt
     ctx.storage.set("performance_prompt", PROMPT)
 
@@ -175,11 +288,13 @@ async def startup(ctx: Context):
         },
     )
 
+    ctx.logger.info("Performance Agent ready to receive requests!")
+
 
 @performance_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    pass
+    ctx.logger.info("Performance Agent shutting down...")
 
 
 @performance_protocol.on_message(model=PerformanceRequest, replies=PerformanceResponse)
@@ -190,43 +305,33 @@ async def handle_performance_request(
     Handle performance monitoring request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier name from orchestrator
-    2. Load supplier data from compliance, financial, and risk files
-    3. Extract monitoring insights based on performance_prompt guidelines
+    1. Receive supplier name and product category from orchestrator
+    2. Load performance CSV data and filter by product category
+    3. Analyze filtered data for weather, strikes, politics, and legal insights
     4. Return performance update to orchestrator
     """
+    ctx.logger.info("")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("📥 PERFORMANCE AGENT: RECEIVED REQUEST")
+    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"From: {sender}")
+    ctx.logger.info(f"Request ID: {msg.request_id}")
+    ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
+    ctx.logger.info(f"Product Category: {msg.product_category}")
+    ctx.logger.info("=" * 70)
+
     try:
-        # Load supplier data from files
-        compliance_data = load_supplier_file(msg.supplier_name, COMPLIANCE_FILES_PATH)
-        risk_data = load_supplier_file(msg.supplier_name, RISK_MANAGEMENT_FILES_PATH)
-        financial_data = load_supplier_file(msg.supplier_name, FINANCIAL_FILES_PATH)
+        # Load and filter CSV data by product category
+        product_category = msg.product_category or "food"
+        ctx.logger.info(f"Loading performance data for category: {product_category}")
 
-        # Check if supplier files exist
-        if not compliance_data and not risk_data and not financial_data:
+        performance_data = load_performance_csv_data(product_category)
+        ctx.logger.info(f"Found {len(performance_data)} {product_category} products")
 
-            # Return response indicating supplier not found
-            response = PerformanceResponse(
-                request_id=msg.request_id,
-                supplier_name=msg.supplier_name,
-                weather_status="UNKNOWN",
-                weather_details=f"No monitoring data available for {msg.supplier_name}. This supplier may not be approved for monitoring yet.",
-                strike_status="UNKNOWN",
-                strike_details="No data available",
-                political_status="UNKNOWN",
-                political_details="No data available",
-                legal_status="UNKNOWN",
-                legal_details="No data available",
-                overall_risk_level="UNKNOWN",
-                alerts=["Supplier not found in monitoring system"],
-                timestamp="",
-            )
-        else:
-            # Extract monitoring insights from supplier data
-            insights = extract_monitoring_insights(
-                compliance_data or "", risk_data or "", financial_data or ""
-            )
+        # Analyze the filtered data
+        insights = analyze_performance_data(performance_data, product_category)
 
-            # Build response from extracted insights
+        # Build response from analyzed insights
             response = PerformanceResponse(
                 request_id=msg.request_id,
                 supplier_name=msg.supplier_name,
@@ -242,6 +347,19 @@ async def handle_performance_request(
                 alerts=insights.get("alerts", []),
                 timestamp="",
             )
+
+        ctx.logger.info("")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info("📤 PERFORMANCE AGENT: SENDING RESPONSE")
+        ctx.logger.info("=" * 70)
+        ctx.logger.info(f"To: {sender}")
+        ctx.logger.info(f"Overall Risk: {response.overall_risk_level}")
+        ctx.logger.info(f"Weather: {response.weather_status}")
+        ctx.logger.info(f"Strikes: {response.strike_status}")
+        ctx.logger.info(f"Political: {response.political_status}")
+        ctx.logger.info(f"Legal: {response.legal_status}")
+        ctx.logger.info(f"Alerts: {len(response.alerts)}")
+        ctx.logger.info("=" * 70)
 
         # Send response back to sender (Orchestrator Agent)
         await ctx.send(sender, response)
