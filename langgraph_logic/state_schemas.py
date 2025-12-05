@@ -33,11 +33,12 @@ class SupplierWorkflowState(TypedDict):
     company_values: str
     industry: str
     product_needed: str
+    user_country: Optional[str]  # User's country (e.g., "Germany") - default: United States
 
     # Supplier search results (from Pinecone vector DB)
     supplier_name: Optional[str]
     supplier_location: Optional[str]
-    supplier_country: Optional[str]
+    supplier_country: Optional[str]  # Supplier's country (extracted from B Corp page)
     b_corp_profile_url: Optional[str]
 
     # RAG context from LlamaIndex + Pinecone (EPA, BBB documents)

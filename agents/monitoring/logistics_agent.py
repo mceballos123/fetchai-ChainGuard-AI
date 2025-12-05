@@ -13,7 +13,7 @@ load_dotenv()
 logistics_agent = Agent(
     name="logistics_agent",
     seed=os.getenv("LOGISTICS_AGENT_SEED"),
-    port=8006,
+    port=8008,
     mailbox=True,
 )
 

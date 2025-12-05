@@ -8,7 +8,7 @@ from datetime import datetime
 from models.financial import FinancialRequest, FinancialResponse
 from dotenv import load_dotenv
 from langgraph_logic.financial_langgraph import (
-    FinancialRAGSystem,
+    FinancialAnalysisSystem,
     build_financial_workflow,
 )
 from langgraph_logic.state_schemas import SupplierWorkflowState
@@ -33,32 +33,32 @@ financial_agent = Agent(
 
 financial_protocol = Protocol(name="financial_protocol", version="1.0")
 
-rag_system = None
+analysis_system = None
 financial_workflow = None
 
 
 @financial_agent.on_event("startup")
 async def startup(ctx: Context):
-    """Initialize agent, RAG system, and LangGraph workflow on startup"""
+    """Initialize agent and LangGraph workflow on startup"""
     ctx.logger.info("Financial Agent starting up...")
     ctx.logger.info(f"Agent address: {financial_agent.address}")
 
-    # Initialize RAG system
-    global rag_system, financial_workflow
-    if rag_system is None:
-        rag_system = FinancialRAGSystem()
+    # Initialize Financial Analysis system (no RAG/Pinecone needed)
+    global analysis_system, financial_workflow
+    if analysis_system is None:
+        analysis_system = FinancialAnalysisSystem()
 
-    success = await rag_system.initialize(ctx)
+    success = await analysis_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("Financial Agent ready with RAG system!")
+        ctx.logger.info("Financial Agent ready! (No RAG - simplified analysis)")
 
         # Build LangGraph workflow
         if financial_workflow is None:
-            financial_workflow = build_financial_workflow(rag_system, ctx)
+            financial_workflow = build_financial_workflow(analysis_system, ctx)
             ctx.logger.info("LangGraph financial workflow built!")
     else:
-        ctx.logger.warning("Financial Agent running in fallback mode (no RAG)")
+        ctx.logger.warning("Financial Agent initialization failed")
 
     # Initialize state storage for supplier information
     ctx.storage.set("supplier_history", [])
@@ -117,18 +117,18 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     Handle financial risk check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info, B Corp URL, and industry from orchestrator
+    1. Receive supplier info, B Corp URL, industry, and user_country from orchestrator
     2. Store previous state and update current state
     3. Create workflow state from request
     4. Run LangGraph financial workflow:
-       - financial_check_node: Scrape B Corp page ONLY for Headquarters to extract country
-       - Apply country-specific financial analysis based on US trade relationships
+       - financial_check_node: Scrape B Corp page for supplier country
+       - Analyze trade relationship between user_country and supplier_country
        - financial_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
     5. Build FinancialResponse from workflow result
     6. Return response to orchestrator
 
-    Note: Only extracts country from Headquarters section (e.g., "Catalonia, Spain" -> "Spain")
+    Note: Supports any user country (e.g., "I'm in Germany and want a coffee supplier")
     """
     ctx.logger.info("")
     ctx.logger.info("=" * 70)
@@ -139,6 +139,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
     ctx.logger.info(f"B Corp URL: {msg.b_corp_profile_url}")
     ctx.logger.info(f"Industry: {msg.industry}")
+    ctx.logger.info(f"User Country: {msg.user_country}")
     ctx.logger.info("=" * 70)
 
     # Log request reception
@@ -155,6 +156,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         "supplier_name": msg.supplier_name,
         "b_corp_profile_url": msg.b_corp_profile_url,
         "industry": msg.industry,
+        "user_country": msg.user_country,
         "timestamp": msg.timestamp,
         "sender": sender,
     }
@@ -168,9 +170,8 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             raise RuntimeError("Financial workflow not ready")
 
         ctx.logger.info("🔄 Starting LangGraph financial workflow...")
-        ctx.logger.info(
-            f"Will scrape B Corp Headquarters section ONLY to extract country"
-        )
+        ctx.logger.info(f"User Country: {msg.user_country}")
+        ctx.logger.info(f"Will scrape B Corp page to extract supplier country")
 
         # Create workflow state from request
         workflow_state = SupplierWorkflowState(
@@ -181,10 +182,11 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             company_values="",
             industry=msg.industry,
             product_needed="",
+            user_country=msg.user_country,  # User's country for trade analysis
             supplier_name=msg.supplier_name,
             supplier_location=None,
             supplier_country=None,  # Will be scraped from B Corp page
-            b_corp_profile_url=msg.b_corp_profile_url,  # Critical: B Corp URL to scrape country from
+            b_corp_profile_url=msg.b_corp_profile_url,  # B Corp URL to scrape country from
             retrieved_documents=None,
             rag_context=None,
             compliance_score=None,
@@ -210,8 +212,12 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         financial_score = result.get("financial_score", 70.0)
         financial_details = result.get("financial_info", "Analysis complete")
         risk_factors = result.get("risk_factors", [])
+        supplier_country = result.get("supplier_country", "Unknown")
+        user_country = result.get("user_country", msg.user_country)
 
         ctx.logger.info(f"Financial Analysis Results:")
+        ctx.logger.info(f"  - User Country: {user_country}")
+        ctx.logger.info(f"  - Supplier Country: {supplier_country}")
         ctx.logger.info(f"  - Score: {financial_score}/100")
         ctx.logger.info(f"  - Risk Factors: {len(risk_factors)}")
         ctx.logger.info(
@@ -225,6 +231,8 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
             financial_score=financial_score,
             financial_details=financial_details,
             risk_factors=risk_factors if risk_factors else [],
+            user_country=user_country,
+            supplier_country=supplier_country,
             timestamp="",
         )
 

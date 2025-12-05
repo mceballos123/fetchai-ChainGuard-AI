@@ -1,3 +1,14 @@
+"""
+Risk LangGraph Workflow - With Ollama LLM (No Pinecone/RAG)
+
+This module handles risk analysis by:
+1. Scraping B Corp page for supplier risk-related data
+2. Using Ollama LLM to evaluate the scraped data with the risk prompt
+3. Returning risk score and details
+
+Uses Ollama for LLM reasoning, but no vector stores or RAG systems.
+"""
+
 from typing import Dict, Any, List, Optional, Literal
 from models.risk import RiskRequest, RiskResponse
 from langgraph_logic.state_schemas import SupplierWorkflowState
@@ -13,54 +24,50 @@ from selenium.webdriver.support import expected_conditions as EC
 
 from dotenv import load_dotenv
 from uagents import Context
-from llama_index.core import (
-    VectorStoreIndex,
-    Settings,
-    Document,
-)
-from llama_index.core.node_parser import SimpleNodeParser
-from llama_index.vector_stores.pinecone import PineconeVectorStore
-from llama_index.embeddings.ollama import OllamaEmbedding
-from pinecone import Pinecone, ServerlessSpec
 from ollama import Client
 
 from langgraph.graph import StateGraph, START, END
 from prompts.risk_prompt import risk_prompt
-from llama_index.llms.ollama import Ollama
+
+# Commented out - RAG/Pinecone not needed
+# from llama_index.core import VectorStoreIndex, Settings, Document
+# from llama_index.core.node_parser import SimpleNodeParser
+# from llama_index.vector_stores.pinecone import PineconeVectorStore
+# from llama_index.embeddings.ollama import OllamaEmbedding
+# from pinecone import Pinecone, ServerlessSpec
+# from llama_index.llms.ollama import Ollama
 
 load_dotenv()
 
-PINECONE_INDEX_NAME = os.getenv("PINECONE_RISK_MANGEMENT_INDEX_NAME")
-EMBEDDING_DIMENSION = 768
+# Commented out - Pinecone not needed
+# PINECONE_INDEX_NAME = os.getenv("PINECONE_RISK_MANGEMENT_INDEX_NAME")
+# EMBEDDING_DIMENSION = 768
 
 
-class RiskRAGSystem:
-    """RAG system for risk management using B Corp web scraping"""
+class RiskAnalysisSystem:
+    """
+    Risk analysis system - scrapes B Corp page and uses Ollama LLM for analysis.
+
+    Uses Ollama LLM for reasoning and detailed analysis generation.
+    No Pinecone or RAG needed - uses scraped data directly with LLM.
+    """
 
     def __init__(self):
         self.initialized = False
-        self.index = None
-        self.query_engine = None
 
-        # Initialize Ollama Client (direct connection)
-        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
-
-        self.llm_type = "ollama"
+        # Initialize Ollama Client for LLM reasoning
+        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=400)
         self.llm_model = "llama3.2:1b"
 
-        # Initialize Ollama embeddings (still using LlamaIndex for embeddings)
-        self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+        # Commented out - RAG/Pinecone not needed
+        # self.index = None
+        # self.query_engine = None
+        # self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
+        # Settings.embed_model = self.embed_model
+        # Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
 
-        # Configure Settings for LlamaIndex (embeddings only)
-        Settings.embed_model = self.embed_model
-        Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
-        print(f"Settings on line 57: {Settings}")
-
-        print(f"Setting up Risk RAG System: {Settings.llm}")
         self.documents = []
         self.scraped_supplier_data = {}
-        print(f"Documents on line 59: {self.documents}")
-        print(f"Scraped supplier data on line 60: {self.scraped_supplier_data}")
 
     async def scrape_bcorp_supplier_page(
         self, ctx: Context, supplier_name: str, company_url: str
@@ -68,9 +75,18 @@ class RiskRAGSystem:
         """
         Scrape B Corp supplier page for risk management information.
         Focuses on operational capacity, supply chain, and logistics data.
+
+        Args:
+            supplier_name: Name of the supplier
+            company_url: B Corp profile URL
+
+        Returns:
+            Dictionary with scraped data from all tabs
         """
         driver = None
         try:
+            ctx.logger.info(f"Scraping B Corp page for: {supplier_name}")
+
             chrome_options = Options()
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--no-sandbox")
@@ -106,7 +122,6 @@ class RiskRAGSystem:
 
             # Extract Overall B Impact Score
             score_element = soup.find("div", class_=re.compile(".*score.*", re.I))
-            print(f"Score element on line 109: {score_element}")
             if score_element:
                 score_text = score_element.get_text(strip=True)
                 scraped_data["overall_score"] = score_text
@@ -174,141 +189,91 @@ class RiskRAGSystem:
                     ctx.logger.warning(f"Error closing driver: {e}")
 
     async def initialize(self, ctx: Context) -> bool:
+        """Initialize the risk analysis system with Ollama LLM"""
         try:
-            if not await self._setup_pinecone(ctx):
-                return False
+            # Test Ollama connection
+            try:
+                test_response = self.ollama_client.chat(
+                    model=self.llm_model,
+                    messages=[{"role": "user", "content": "Hello"}],
+                )
+                ctx.logger.info(f"Ollama LLM connected: {self.llm_model}")
+            except Exception as e:
+                ctx.logger.warning(f"Ollama connection test failed: {e}")
+                ctx.logger.info("Will use fallback analysis without LLM")
 
+            # Commented out - Pinecone not needed
+            # if not await self._setup_pinecone(ctx):
+            #     return False
+
+            ctx.logger.info(
+                "Risk Analysis System initialized (with Ollama LLM, no Pinecone)"
+            )
             self.initialized = True
             return True
 
         except Exception as e:
-            ctx.logger.error(f"Failed to initialize RAG system: {e}")
+            ctx.logger.error(f"Failed to initialize: {e}")
             import traceback
 
             traceback.print_exc()
             return False
 
-    async def _setup_pinecone(self, ctx: Context) -> bool:
-        """Setup Pinecone vector store"""
+    # Commented out - Pinecone not needed
+    # async def _setup_pinecone(self, ctx: Context) -> bool:
+    #     """Setup Pinecone vector store"""
+    #     ...
+
+    # async def _index_documents(self, ctx: Context) -> bool:
+    #     """Index risk documents in Pinecone"""
+    #     ...
+
+    # async def _index_scraped_document(self, ctx: Context, document) -> bool:
+    #     """Index a single scraped document in Pinecone"""
+    #     ...
+
+    # async def _check_supplier_in_pinecone(self, ctx: Context, supplier_name: str) -> bool:
+    #     """Check if supplier data already exists in Pinecone"""
+    #     ...
+
+    def _query_llm_for_analysis(
+        self,
+        ctx: Context,
+        prompt: str,
+        supplier_name: str,
+    ) -> str:
+        """
+        Query Ollama LLM for detailed risk analysis.
+
+        Args:
+            ctx: Context for logging
+            prompt: The risk prompt to send to LLM
+            supplier_name: Name of the supplier
+
+        Returns:
+            LLM-generated analysis text
+        """
         try:
-            pinecone_api_key = os.getenv("PINECONE_API_KEY")
-            if not pinecone_api_key:
-                ctx.logger.error("PINECONE_API_KEY not set")
-                return False
+            ctx.logger.info(f"Querying Ollama LLM for risk analysis...")
 
-            # Initialize Pinecone
-            pc = Pinecone(api_key=pinecone_api_key)
-
-            # Check if index exists
-            existing_indexes = [idx.name for idx in pc.list_indexes()]
-
-            if PINECONE_INDEX_NAME not in existing_indexes:
-                pc.create_index(
-                    name=PINECONE_INDEX_NAME,
-                    dimension=EMBEDDING_DIMENSION,
-                    metric="cosine",
-                    spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-                )
-
-            # Get Pinecone index
-            pinecone_index = pc.Index(PINECONE_INDEX_NAME)
-
-            # Create LlamaIndex vector store
-            vector_store = PineconeVectorStore(pinecone_index=pinecone_index)
-
-            # Create index from vector store
-            self.index = VectorStoreIndex.from_vector_store(vector_store)
-
-            # Create query engine
-            self.query_engine = self.index.as_query_engine(
-                similarity_top_k=1, response_mode="compact", verbose=True
+            response = self.ollama_client.chat(
+                model=self.llm_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a risk analyst specializing in supply chain risk management, operational capacity, and logistics. Analyze the provided data and provide structured scores and summaries.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
             )
 
-            return True
+            llm_response = response["message"]["content"]
+            ctx.logger.info(f"LLM analysis received ({len(llm_response)} chars)")
+            return llm_response
 
         except Exception as e:
-            ctx.logger.error(f"Error setting up Pinecone: {e}")
-            return False
-
-    async def _index_documents(self, ctx: Context) -> bool:
-        """Index risk management documents in Pinecone (only if not already indexed)"""
-        try:
-            if not self.index:
-                ctx.logger.warning("Index not initialized, skipping document indexing")
-                return False
-
-            # Check if documents are already indexed in Pinecone
-            try:
-                # Get the Pinecone index stats to check if it has vectors
-                from pinecone import Pinecone
-
-                pinecone_api_key = os.getenv("PINECONE_API_KEY")
-                pc = Pinecone(api_key=pinecone_api_key)
-                pinecone_index = pc.Index(PINECONE_INDEX_NAME)
-                stats = pinecone_index.describe_index_stats()
-
-                total_vectors = stats.get("total_vector_count", 0)
-
-                if total_vectors > 0:
-                    return True
-            except Exception as e:
-                ctx.logger.warning(
-                    f"Could not check index stats: {e}, proceeding with indexing..."
-                )
-
-            # Parse documents into nodes (chunks)
-            parser = SimpleNodeParser.from_defaults(
-                chunk_size=512,
-                chunk_overlap=20,
-            )
-
-            nodes = []
-            print(f"Nodes on line 266: {nodes}")
-            print(f"Documents on line 267: {self.documents}")
-            for doc in self.documents:
-                doc_nodes = parser.get_nodes_from_documents([doc])
-                nodes.extend(doc_nodes)
-
-            # Index nodes in Pinecone
-            for node in nodes:
-                try:
-                    self.index.insert_nodes([node])
-                except Exception as e:
-                    ctx.logger.warning(f"Error indexing node: {e}")
-
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error indexing documents: {e}")
-            return False
-
-    async def _index_scraped_document(self, ctx: Context, document: Document) -> bool:
-        """Index a single scraped document in Pinecone"""
-        try:
-            if not self.index:
-                ctx.logger.error("Index not initialized")
-                return False
-
-            # Parse document into nodes (chunks)
-            parser = SimpleNodeParser.from_defaults(
-                chunk_size=512,
-                chunk_overlap=20,
-            )
-
-            nodes = parser.get_nodes_from_documents([document])
-
-            # Index nodes in Pinecone
-            for node in nodes:
-                try:
-                    self.index.insert_nodes([node])
-                except Exception as e:
-                    ctx.logger.warning(f"Error indexing node: {e}")
-
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error indexing document: {e}")
-            return False
+            ctx.logger.warning(f"LLM query failed: {e}")
+            return f"Unable to analyze risk for {supplier_name}. Error: {str(e)}"
 
     async def query_risk_documents(
         self,
@@ -318,15 +283,13 @@ class RiskRAGSystem:
         b_corp_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Query RAG system for supplier risk information by scraping B Corp website.
+        Analyze supplier risk by scraping B Corp page and using Ollama LLM.
 
-        Process:
-        1. Scrape B Corp page for supplier (all tabs for risk indicators)
-        2. Convert scraped data to Document and create embeddings
-        3. Store embeddings in Pinecone
-        4. Query RAG system for risk analysis
-        5. Use LLM to analyze risk factors and generate scores
-        6. Return structured risk data
+        SIMPLIFIED FLOW (No RAG/Pinecone):
+        1. Scrape B Corp page for supplier data
+        2. Format scraped data as text
+        3. Send to Ollama LLM with risk prompt
+        4. Parse LLM response and extract scores
 
         Returns:
         {
@@ -337,17 +300,23 @@ class RiskRAGSystem:
         }
         """
         if not self.initialized:
-            ctx.logger.error("RAG system not initialized")
+            ctx.logger.error("System not initialized")
             return self._generate_fallback_response(supplier_name)
 
         try:
-            # Step 1: Scrape B Corp page for supplier
+            # Construct B Corp URL if not provided
             if not b_corp_url:
                 supplier_slug = (
                     supplier_name.lower().replace(" ", "-").replace("_", "-")
                 )
                 b_corp_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/company/{supplier_slug}"
-            print(f"B Corp URL on line 350: {b_corp_url}")
+
+            ctx.logger.info(f"B Corp URL: {b_corp_url}")
+
+            # ================================================================
+            # STEP 1: SCRAPE B CORP PAGE
+            # ================================================================
+            ctx.logger.info(f"Scraping B Corp data for {supplier_name}...")
 
             scraped_data = await self.scrape_bcorp_supplier_page(
                 ctx, supplier_name, b_corp_url
@@ -357,54 +326,45 @@ class RiskRAGSystem:
                 ctx.logger.warning("Scraping failed, using fallback")
                 return self._generate_fallback_response(supplier_name)
 
-            # Step 2: Convert scraped data to LlamaIndex Document
+            # ================================================================
+            # STEP 2: FORMAT SCRAPED DATA AS TEXT
+            # ================================================================
             supplier_text = f"""
-            Supplier: {scraped_data['supplier_name']}
-            Overall B Impact Score: {scraped_data.get('overall_score', 'N/A')}
-            
-            GOVERNANCE:
-            {scraped_data.get('governance', 'No data')}
-            
-            WORKERS:
-            {scraped_data.get('workers', 'No data')}
-            
-            COMMUNITY:
-            {scraped_data.get('community', 'No data')}
-            
-            ENVIRONMENT:
-            {scraped_data.get('environment', 'No data')}
-            
-            CUSTOMERS:
-            {scraped_data.get('customers', 'No data')}
-            """
+Supplier: {scraped_data['supplier_name']}
+Overall B Impact Score: {scraped_data.get('overall_score', 'N/A')}
 
-            print(f"Supplier text on line 381: {supplier_text}")
+GOVERNANCE:
+{scraped_data.get('governance', 'No data')}
 
-            # Create Document object
-            doc = Document(
-                text=supplier_text,
-                metadata={
-                    "supplier_name": supplier_name,
-                    "source": "bcorp_scrape",
-                    "url": b_corp_url,
-                },
-            )
-            print(f"Document on line 393: {doc}")
+WORKERS:
+{scraped_data.get('workers', 'No data')}
 
-            # Step 3: Index the document in Pinecone
-            await self._index_scraped_document(ctx, doc)
+COMMUNITY:
+{scraped_data.get('community', 'No data')}
 
-            # Step 4: Query RAG system
+ENVIRONMENT:
+{scraped_data.get('environment', 'No data')}
+
+CUSTOMERS:
+{scraped_data.get('customers', 'No data')}
+"""
+
+            ctx.logger.info(f"Formatted supplier data for LLM analysis")
+
+            # ================================================================
+            # STEP 3: QUERY OLLAMA LLM WITH RISK PROMPT
+            # ================================================================
             query = risk_prompt(supplier_name, industry)
+            full_prompt = f"{query}\n\nSupplier Data:\n{supplier_text}"
+            ctx.logger.info(f"Querying Ollama for risk analysis...")
 
-            # Query using the indexed data
-            rag_response = self.query_engine.query(query)
-            response_text = str(rag_response)
+            # Query Ollama LLM directly (no RAG)
+            llm_response = self._query_llm_for_analysis(ctx, full_prompt, supplier_name)
 
-            print(f"Response text on line 404: {response_text}")
-
-            # Step 5: Parse response and extract risk data
-            result = await self._parse_rag_response(ctx, response_text, supplier_name)
+            # ================================================================
+            # STEP 4: PARSE RESPONSE
+            # ================================================================
+            result = await self._parse_llm_response(ctx, llm_response, supplier_name)
             result["scraped_data"] = scraped_data
 
             return result
@@ -416,13 +376,12 @@ class RiskRAGSystem:
             traceback.print_exc()
             return self._generate_fallback_response(supplier_name)
 
-    async def _parse_rag_response(
+    async def _parse_llm_response(
         self, ctx: Context, response_text: str, supplier_name: str
     ) -> Dict[str, Any]:
         """Parse LLM response and extract structured risk data"""
         try:
-
-            # Initialize defaults (using 70 as neutral baseline instead of 50)
+            # Initialize defaults
             risk_score = 50.0
             risk_details = "Insufficient risk data"
             risk_factors = []
@@ -483,128 +442,93 @@ class RiskRAGSystem:
             }
 
         except Exception as e:
-            ctx.logger.error(f"Error parsing RAG response: {e}")
+            ctx.logger.error(f"Error parsing LLM response: {e}")
             import traceback
 
             traceback.print_exc()
             return self._generate_fallback_response(supplier_name)
 
     def _generate_fallback_response(self, supplier_name: str) -> Dict[str, Any]:
-        """Generate fallback response when RAG is unavailable"""
+        """Generate fallback response when analysis fails"""
         return {
-            "risk_score": 70.0,  # Neutral baseline score
+            "risk_score": 50.0,
             "risk_details": f"Unable to retrieve detailed risk information for {supplier_name}",
             "risk_factors": ["Data retrieval unavailable"],
-            "retrieved_context": "Fallback mode - RAG system unavailable",
+            "retrieved_context": "Fallback mode - analysis unavailable",
         }
 
-    def query_risk_documents_sync(
-        self,
-        supplier_name: str,
-        industry: str,
-        b_corp_url: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Synchronous wrapper for query_risk_documents for use in LangGraph nodes"""
+
+# ============================================================================
+# LANGGRAPH WORKFLOW NODES
+# ============================================================================
+
+
+def risk_check_node(
+    state: SupplierWorkflowState,
+    analysis_system: RiskAnalysisSystem,
+    ctx: Context,
+) -> SupplierWorkflowState:
+    """
+    Node 1: Run risk check on supplier using Ollama LLM.
+
+    Process:
+    1. Scrape B Corp webpage for supplier
+    2. Send scraped data to Ollama with risk prompt
+    3. Parse response and extract risk score
+    4. Return risk score and details
+    """
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("[LangGraph Node: risk_check] SCRAPING & ANALYZING")
+    ctx.logger.info("=" * 70)
+
+    try:
+        supplier_name = state.get("supplier_name", "Unknown")
+        b_corp_url = state.get("b_corp_profile_url")
+        industry = state.get("industry", "")
+
+        ctx.logger.info(f"Analyzing risk for: {supplier_name}")
+
+        # Run analysis synchronously
         import asyncio
+        import concurrent.futures
 
-        # Create a mock context for sync execution
-        class MockContext:
-            def __init__(self):
-                self.logs = []
-
-            class Logger:
-                def __init__(self, parent):
-                    self.parent = parent
-
-                def info(self, msg):
-                    pass
-
-                def error(self, msg):
-                    pass
-
-                def warning(self, msg):
-                    pass
-
-            @property
-            def logger(self):
-                return self.Logger(self)
-
-        try:
-            mock_ctx = MockContext()
+        def run_async():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
             try:
-                # Try to get current running loop
-                loop = asyncio.get_running_loop()
-                # If we're here, a loop is running, use a different approach
-                import concurrent.futures
-
-                def run_async():
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        return new_loop.run_until_complete(
-                            self.query_risk_documents(
-                                ctx=mock_ctx,
-                                supplier_name=supplier_name,
-                                industry=industry,
-                                b_corp_url=b_corp_url,
-                            )
-                        )
-                    finally:
-                        new_loop.close()
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(run_async)
-                    result = future.result(timeout=600)  # 10 minute timeout
-                    return result
-            except RuntimeError:
-                # No event loop running, use asyncio.run()
-                result = asyncio.run(
-                    self.query_risk_documents(
-                        ctx=mock_ctx,
+                return new_loop.run_until_complete(
+                    analysis_system.query_risk_documents(
+                        ctx=ctx,
                         supplier_name=supplier_name,
                         industry=industry,
                         b_corp_url=b_corp_url,
                     )
                 )
-                return result
-        except Exception as e:
-            import traceback
+            finally:
+                new_loop.close()
 
-            traceback.print_exc()
-            return self._generate_fallback_response(supplier_name)
-
-
-def risk_check_node(
-    state: SupplierWorkflowState, rag_system: RiskRAGSystem, ctx: Context
-) -> SupplierWorkflowState:
-    """
-    Node 1: Run risk management check on supplier using RAG system with web scraping.
-
-    Process:
-    1. Scrape B Corp webpage for supplier
-    2. Convert to embeddings and store in Pinecone
-    3. Query RAG system for risk analysis
-    4. Return risk score and details
-
-    Input: supplier_name, industry, b_corp_profile_url (optional)
-    Output: risk_score, risk_details, risk_factors
-    """
-    try:
-        supplier_name = state.get("supplier_name", "Unknown")
-        b_corp_url = state.get("b_corp_profile_url")
-
-        # Run RAG query for risk management (includes scraping)
-        rag_result = rag_system.query_risk_documents_sync(
-            supplier_name=supplier_name,
-            industry=state.get("industry", ""),
-            b_corp_url=b_corp_url,
-        )
+        try:
+            loop = asyncio.get_running_loop()
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(run_async)
+                result = future.result(timeout=300)
+        except RuntimeError:
+            result = asyncio.run(
+                analysis_system.query_risk_documents(
+                    ctx=ctx,
+                    supplier_name=supplier_name,
+                    industry=industry,
+                    b_corp_url=b_corp_url,
+                )
+            )
 
         # Update state with risk results
-        state["risk_score"] = rag_result.get("risk_score", 0.0)
-        state["risk_details"] = rag_result.get("risk_details", "N/A")
-        state["risk_factors"] = rag_result.get("risk_factors", [])
+        state["risk_score"] = result.get("risk_score", 0.0)
+        state["risk_details"] = result.get("risk_details", "N/A")
+        state["risk_factors"] = result.get("risk_factors", [])
         state["current_step"] = "risk_check_complete"
+
+        ctx.logger.info(f"Risk Score: {state['risk_score']}/100")
 
         return state
 
@@ -627,8 +551,8 @@ def risk_router(
     Node 2: Conditional routing based on risk score.
 
     Routes to:
-    - "success_node" if score >= 70 (APPROVED)
-    - "error_node" if score < 70 OR error occurred (REJECTED)
+    - "success_node" if score >= 60 (APPROVED)
+    - "error_node" if score < 60 OR error occurred (REJECTED)
     """
     risk_score = state.get("risk_score", 0.0)
     error_message = state.get("error_message")
@@ -637,7 +561,7 @@ def risk_router(
     if error_message:
         return "error_node"
 
-    # Check risk threshold
+    # Check risk threshold (60+ means acceptable risk)
     if risk_score >= 60:
         return "success_node"
     else:
@@ -648,47 +572,74 @@ def risk_router(
 
 
 def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
-    """
-    Node 3a: Success path - Supplier meets risk management requirements.
-    """
+    """Node 3a: Success path - Supplier meets risk requirements."""
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("SUCCESS NODE - RISK APPROVED")
+    ctx.logger.info("=" * 70)
+
     state["current_step"] = "risk_approved"
     state["should_continue"] = False
+
+    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
+    ctx.logger.info(f"Score: {state['risk_score']}/100")
+    ctx.logger.info(f"Status: APPROVED")
+    ctx.logger.info("=" * 70)
 
     return state
 
 
 def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
-    """
-    Node 3b: Error path - Supplier does not meet requirements.
-    """
+    """Node 3b: Error path - Supplier does not meet requirements."""
+    ctx.logger.info("=" * 70)
+    ctx.logger.info("ERROR NODE - RISK REJECTED")
+    ctx.logger.info("=" * 70)
+
+    risk_score = state.get("risk_score", 0.0)
+    error_msg = state.get("error_message", "Unknown error")
+
+    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
+    ctx.logger.info(f"Score: {risk_score}/100")
+    ctx.logger.info(f"Error: {error_msg}")
+    ctx.logger.info("=" * 70)
+
     state["current_step"] = "risk_rejected"
     state["should_continue"] = False
 
     return state
 
 
-def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
+# ============================================================================
+# BUILD LANGGRAPH WORKFLOW
+# ============================================================================
+
+
+def build_risk_workflow(
+    analysis_system: RiskAnalysisSystem, ctx: Context
+) -> StateGraph:
     """
-    Build the LangGraph risk management workflow.
+    Build the LangGraph risk workflow.
 
     Flow:
     START
-        ↓
-    risk_check_node (Scrape B Corp + Run RAG analysis)
-        ↓
+        |
+    risk_check_node (Scrape B Corp + Analyze with Ollama)
+        |
     risk_router (Check score >= 60)
-        ├─→ success_node (Score >= 60) → END
-        └─→ error_node (Score < 60 or error) → END
+        |--- success_node (Score >= 60) --> END
+        |--- error_node (Score < 60 or error) --> END
 
     Returns:
         Compiled StateGraph workflow
     """
+    ctx.logger.info("Building Risk LangGraph Workflow...")
+
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
 
     # Add nodes
     workflow.add_node(
-        "risk_check", lambda state: risk_check_node(state, rag_system, ctx)
+        "risk_check",
+        lambda state: risk_check_node(state, analysis_system, ctx),
     )
     workflow.add_node("success_node", lambda state: success_node(state, ctx))
     workflow.add_node("error_node", lambda state: error_node(state, ctx))
@@ -709,4 +660,10 @@ def build_risk_workflow(rag_system: RiskRAGSystem, ctx: Context) -> StateGraph:
     # Compile workflow
     compiled_workflow = workflow.compile()
 
+    ctx.logger.info("Risk workflow built successfully (with Ollama LLM, no Pinecone)")
+
     return compiled_workflow
+
+
+# Backwards compatibility alias
+RiskRAGSystem = RiskAnalysisSystem

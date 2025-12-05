@@ -9,7 +9,7 @@ from datetime import datetime
 from models.compliance import ComplianceRequest, ComplianceResponse
 from dotenv import load_dotenv
 from langgraph_logic.compliance_langgraph import (
-    ComplianceRAGSystem,
+    ComplianceAnalysisSystem,
     build_compliance_workflow,
 )
 from langgraph_logic.state_schemas import SupplierWorkflowState
@@ -34,32 +34,32 @@ compliance_agent = Agent(
 
 compliance_protocol = Protocol(name="compliance_protocol", version="1.0")
 
-rag_system = None
+analysis_system = None
 compliance_workflow = None
 
 
 @compliance_agent.on_event("startup")
 async def startup(ctx: Context):
-    """Initialize agent, RAG system, and LangGraph workflow on startup"""
+    """Initialize agent, analysis system, and LangGraph workflow on startup"""
     ctx.logger.info("Compliance Agent starting up...")
     ctx.logger.info(f"Agent address: {compliance_agent.address}")
 
-    # Initialize RAG system
-    global rag_system, compliance_workflow
-    if rag_system is None:
-        rag_system = ComplianceRAGSystem()
+    # Initialize analysis system (uses Ollama LLM, no RAG/Pinecone)
+    global analysis_system, compliance_workflow
+    if analysis_system is None:
+        analysis_system = ComplianceAnalysisSystem()
 
-    success = await rag_system.initialize(ctx)
+    success = await analysis_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("Compliance Agent ready with RAG system!")
+        ctx.logger.info("Compliance Agent ready with Ollama LLM!")
 
         # Build LangGraph workflow
         if compliance_workflow is None:
-            compliance_workflow = build_compliance_workflow(rag_system, ctx)
+            compliance_workflow = build_compliance_workflow(analysis_system, ctx)
             ctx.logger.info("LangGraph compliance workflow built!")
     else:
-        ctx.logger.warning("Compliance Agent running in fallback mode (no RAG)")
+        ctx.logger.warning("Compliance Agent running in fallback mode")
 
     # Initialize state storage for supplier information
     ctx.storage.set("supplier_history", [])
@@ -94,7 +94,7 @@ async def shutdown(ctx: Context):
     # Log final state before shutdown
     supplier_history = ctx.storage.get("supplier_history") or []
     ctx.logger.info(f"Total suppliers processed: {len(supplier_history)}")
-    ctx.logger.info("Workflow and RAG system cleanup complete")
+    ctx.logger.info("Workflow cleanup complete")
 
 
 def get_supplier_state(ctx: Context) -> Dict[str, Any]:
@@ -160,13 +160,13 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
     ctx.storage.set("current_supplier", current_supplier_info)
 
     try:
-        # === USING LANGGRAPH WORKFLOW WITH RAG ===
+        # === USING LANGGRAPH WORKFLOW ===
 
         if compliance_workflow is None:
-            ctx.logger.error("❌ Compliance workflow not initialized!")
+            ctx.logger.error("Compliance workflow not initialized!")
             raise RuntimeError("Compliance workflow not ready")
 
-        ctx.logger.info("🔄 Starting LangGraph compliance workflow...")
+        ctx.logger.info("Starting LangGraph compliance workflow...")
 
         # Create workflow state from request
         workflow_state = SupplierWorkflowState(
@@ -202,7 +202,7 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
 
         result = compliance_workflow.invoke(workflow_state)
 
-        ctx.logger.info("✅ LangGraph workflow completed")
+        ctx.logger.info("LangGraph workflow completed")
 
         # Extract results
         compliance_score = result.get("compliance_score", 70.0)

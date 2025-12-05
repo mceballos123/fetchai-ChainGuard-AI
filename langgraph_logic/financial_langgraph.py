@@ -1,82 +1,66 @@
+"""
+Financial LangGraph Workflow - With Ollama LLM Reasoning (No Pinecone/RAG)
+
+This module handles financial risk analysis by:
+1. Extracting supplier country from B Corp Headquarters section
+2. Analyzing trade relationship between user's country and supplier's country
+3. Using Ollama LLM for reasoning and generating detailed financial analysis
+4. Returning financial score and risk factors
+
+Uses Ollama for LLM reasoning, but no vector stores or RAG systems.
+"""
+
 from typing import Dict, Any, List, Optional, Literal
 from models.financial import FinancialRequest, FinancialResponse
 from langgraph_logic.state_schemas import SupplierWorkflowState
 import os
-import json
 import re
 import time
-import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
 from dotenv import load_dotenv
 from uagents import Context
-from llama_index.core import (
-    VectorStoreIndex,
-    Settings,
-    Document,
-)
-from llama_index.core.node_parser import SimpleNodeParser
-from llama_index.vector_stores.pinecone import PineconeVectorStore
-from llama_index.embeddings.ollama import OllamaEmbedding
-from pinecone import Pinecone, ServerlessSpec
-from ollama import Client
-from llama_index.llms.ollama import Ollama
 from langgraph.graph import StateGraph, START, END
 from prompts.finance_prompt import finance_prompt
+from ollama import Client
 
 load_dotenv()
 
-PINECONE_INDEX_NAME_FINANCIAL = os.getenv(
-    "PINECONE_INDEX_NAME_FINANCIAL", "financial-risk-index"
-)
-EMBEDDING_DIMENSION = 768
 
+class FinancialAnalysisSystem:
+    """
+    Financial analysis system - extracts country from B Corp page and analyzes trade relationships.
 
-class FinancialRAGSystem:
-    """RAG system for financial risk analysis - extracts country from B Corp Headquarters section only"""
+    Uses Ollama LLM for reasoning and detailed analysis generation.
+    No Pinecone or RAG needed - uses rule-based country analysis with LLM-generated details.
+    """
 
     def __init__(self):
         self.initialized = False
-        self.index = None
-        self.query_engine = None
 
-        # Initialize Ollama Client (direct connection)
+        # Initialize Ollama Client for LLM reasoning
         self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
-        self.llm_type = "ollama"
         self.llm_model = "llama3.2:1b"
-
-        # Initialize Ollama embeddings (still using LlamaIndex for embeddings)
-        self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
-
-        # Configure Settings for LLamaIndex (embeddings only, BEFORE any Pinecone initialization!)
-        Settings.embed_model = self.embed_model
-        Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
-
-        print(f"Settings: {Settings}")
-        print(f"Setting up Financial RAG System: {Settings.llm}")
-
-        self.documents = []
-        self.scraped_tariff_data = {}
 
     def _extract_country_from_text(self, text: str, ctx: Context) -> Optional[str]:
         """
         Extract country name from text content.
 
+        For headquarters like "Catalonia, Spain" -> extracts "Spain" (the country, not the city/region).
+
         Args:
-            text: Text to search for country
+            text: Text to search for country (e.g., "Catalonia, Spain" or "Catalonia|Spain")
             ctx: Context for logging
 
         Returns:
             Country name or None
         """
-        print(f"Text on line 75: {text}")
-        print(f"Known countries on line 76: {known_countries}")
         if not text:
             return None
 
+        # List of known countries
         known_countries = [
             "Argentina",
             "Brazil",
@@ -129,34 +113,65 @@ class FinancialRAGSystem:
             "Israel",
             "United Arab Emirates",
             "Saudi Arabia",
+            "Greece",
+            "Poland",
+            "Czech Republic",
+            "Hungary",
+            "Romania",
+            "Turkey",
+            "Russia",
+            "Ukraine",
         ]
+
+        ctx.logger.info(f"Extracting country from text: {text}")
 
         text_lower = text.lower()
 
-        # Check for each known country
+        # PRIORITY 1: Check for known countries in the text
         for country in known_countries:
             if country.lower() in text_lower:
-                # Special handling for USA -> United States
                 if country == "USA":
+                    ctx.logger.info(f"✅ Found country: United States")
                     return "United States"
+                if country == "UK":
+                    ctx.logger.info(f"✅ Found country: United Kingdom")
+                    return "United Kingdom"
+                ctx.logger.info(f"✅ Found country: {country}")
                 return country
 
-        # If no known country found, try to extract from comma-separated location
+        # PRIORITY 2: Extract from comma-separated location
         parts = text.split(",")
         if len(parts) > 1:
             potential_country = parts[-1].strip()
             if len(potential_country) > 2 and potential_country[0].isupper():
+                ctx.logger.info(
+                    f"✅ Extracted country from comma split: {potential_country}"
+                )
                 return potential_country
 
+        # PRIORITY 3: Try pipe-separated
+        parts = text.split("|")
+        if len(parts) > 1:
+            for part in reversed(parts):
+                part_clean = part.strip()
+                for country in known_countries:
+                    if country.lower() == part_clean.lower():
+                        ctx.logger.info(
+                            f"✅ Extracted country from pipe split: {country}"
+                        )
+                        return country
+
+        ctx.logger.warning(f"⚠️ Could not extract country from: {text}")
         return None
 
-    async def scrape_bcorp_financial_page(
+    async def scrape_bcorp_country(
         self, ctx: Context, supplier_name: str, b_corp_url: str
     ) -> Dict[str, str]:
         """
         Scrape B Corp page ONLY to extract country from Headquarters section.
 
         Args:
+            ctx: Context for logging
             supplier_name: Name of supplier
             b_corp_url: B Corp profile URL
 
@@ -192,35 +207,63 @@ class FinancialRAGSystem:
 
             soup = BeautifulSoup(driver.page_source, "html.parser")
 
-            # ONLY extract headquarters to get country - nothing else
-            all_text = soup.get_text(separator="|", strip=True)
-
-            # Look for Headquarters section (e.g., "Headquarters|Catalonia, Spain")
-            hq_patterns = [
-                r"Headquarters\|([^|]+)",
-                r"Headquarters[:\s]+([^|]+)",
-            ]
-
-            for pattern in hq_patterns:
-                match = re.search(pattern, all_text, re.IGNORECASE)
-                if match:
-                    headquarters_text = match.group(1).strip()
-                    ctx.logger.info(f"Found Headquarters: {headquarters_text}")
-
-                    # Extract country from headquarters (e.g., "Catalonia, Spain" -> "Spain")
-                    scraped_data["country"] = self._extract_country_from_text(
-                        headquarters_text, ctx
-                    )
-                    if scraped_data["country"]:
+            # METHOD 1: Try to find Headquarters section directly in DOM
+            headquarters_found = False
+            hq_spans = soup.find_all(
+                "span", string=re.compile(r"Headquarters", re.IGNORECASE)
+            )
+            for hq_span in hq_spans:
+                parent = hq_span.parent
+                if parent:
+                    full_text = parent.get_text(separator=" ", strip=True)
+                    location_text = full_text.replace("Headquarters", "").strip()
+                    if location_text:
                         ctx.logger.info(
-                            f"✅ Country extracted: {scraped_data['country']}"
+                            f"Found Headquarters location (DOM method): {location_text}"
                         )
-                    break
+                        scraped_data["country"] = self._extract_country_from_text(
+                            location_text, ctx
+                        )
+                        if scraped_data["country"]:
+                            ctx.logger.info(
+                                f"✅ Country extracted: {scraped_data['country']}"
+                            )
+                            headquarters_found = True
+                            break
+
+            # METHOD 2: Fallback to text parsing if DOM method didn't work
+            if not headquarters_found:
+                all_text = soup.get_text(separator="|", strip=True)
+                hq_patterns = [
+                    r"Headquarters\|([^|]+)\|?,?\|?([^|]*)",
+                    r"Headquarters\|([^|]+)",
+                    r"Headquarters[:\s]+([^|]+)",
+                ]
+                for pattern in hq_patterns:
+                    match = re.search(pattern, all_text, re.IGNORECASE)
+                    if match:
+                        headquarters_text = " ".join(
+                            g for g in match.groups() if g
+                        ).strip()
+                        headquarters_text = headquarters_text.replace("|", " ").replace(
+                            "  ", " "
+                        )
+                        ctx.logger.info(
+                            f"Found Headquarters (text method): {headquarters_text}"
+                        )
+                        scraped_data["country"] = self._extract_country_from_text(
+                            headquarters_text, ctx
+                        )
+                        if scraped_data["country"]:
+                            ctx.logger.info(
+                                f"✅ Country extracted: {scraped_data['country']}"
+                            )
+                            headquarters_found = True
+                            break
 
             # Fallback: Look for "Operates In" if headquarters didn't work
-            print(f"Scraped data on line 221: {scraped_data}")
-            print(f"All text on line 222: {all_text}")
             if not scraped_data["country"]:
+                all_text = soup.get_text(separator="|", strip=True)
                 operates_pattern = r"Operates In\|([^|]+)"
                 match = re.search(operates_pattern, all_text, re.IGNORECASE)
                 if match:
@@ -248,7 +291,6 @@ class FinancialRAGSystem:
             import traceback
 
             traceback.print_exc()
-
             return {
                 "supplier_name": supplier_name,
                 "country": "Unknown",
@@ -257,448 +299,542 @@ class FinancialRAGSystem:
             }
 
         finally:
-            # Always cleanup driver in finally block
             if driver:
                 try:
                     driver.quit()
-                    ctx.logger.info("B Corp financial scraping WebDriver cleaned up")
+                    ctx.logger.info("WebDriver cleaned up")
                 except Exception as e:
                     ctx.logger.warning(f"Error closing driver: {e}")
 
     async def initialize(self, ctx: Context) -> bool:
+        """Initialize the financial analysis system with Ollama LLM"""
         try:
-            if not await self._setup_pinecone(ctx):
-                return False
+            # Test Ollama connection
+            try:
+                test_response = self.ollama_client.chat(
+                    model=self.llm_model,
+                    messages=[{"role": "user", "content": "Hello"}],
+                )
+                ctx.logger.info(f"✅ Ollama LLM connected: {self.llm_model}")
+            except Exception as e:
+                ctx.logger.warning(f"⚠️ Ollama connection test failed: {e}")
+                ctx.logger.info("Will use fallback analysis without LLM")
 
+            ctx.logger.info(
+                "Financial Analysis System initialized (with Ollama LLM, no Pinecone)"
+            )
             self.initialized = True
             return True
-
         except Exception as e:
-            ctx.logger.error(f"Failed to initialize RAG system: {e}")
-            import traceback
-
-            traceback.print_exc()
+            ctx.logger.error(f"Failed to initialize: {e}")
             return False
 
-    async def _setup_pinecone(self, ctx: Context) -> bool:
-        """Setup Pinecone vector store for financial data"""
+    def _query_llm_for_analysis(
+        self,
+        ctx: Context,
+        prompt: str,
+        supplier_name: str,
+        supplier_country: str,
+        user_country: str,
+    ) -> str:
+        """
+        Query Ollama LLM for detailed financial analysis.
+
+        Args:
+            ctx: Context for logging
+            prompt: The finance prompt to send to LLM
+            supplier_name: Name of the supplier
+            supplier_country: Supplier's country
+            user_country: User's country
+
+        Returns:
+            LLM-generated analysis text
+        """
         try:
-            pinecone_api_key = os.getenv("PINECONE_API_KEY")
-            if not pinecone_api_key:
-                ctx.logger.error("PINECONE_API_KEY not set")
-                return False
+            ctx.logger.info(f"Querying Ollama LLM for financial analysis...")
 
-            # Initialize Pinecone
-            pc = Pinecone(api_key=pinecone_api_key)
-
-            # Check if index exists
-            existing_indexes = [idx.name for idx in pc.list_indexes()]
-
-            if PINECONE_INDEX_NAME_FINANCIAL not in existing_indexes:
-                ctx.logger.info(
-                    f"Creating new Pinecone index: {PINECONE_INDEX_NAME_FINANCIAL}"
-                )
-                pc.create_index(
-                    name=PINECONE_INDEX_NAME_FINANCIAL,
-                    dimension=int(EMBEDDING_DIMENSION),
-                    metric="cosine",
-                    spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-                )
-            else:
-                ctx.logger.info(
-                    f"Using existing Pinecone index: {PINECONE_INDEX_NAME_FINANCIAL}"
-                )
-
-            # Get Pinecone index
-            pinecone_index = pc.Index(PINECONE_INDEX_NAME_FINANCIAL)
-
-            # Create LlamaIndex vector store
-            vector_store = PineconeVectorStore(pinecone_index=pinecone_index)
-
-            # Create index from vector store
-            self.index = VectorStoreIndex.from_vector_store(vector_store)
-
-            # Create query engine
-            self.query_engine = self.index.as_query_engine(
-                similarity_top_k=1, response_mode="compact", verbose=True
+            response = self.ollama_client.chat(
+                model=self.llm_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a financial risk analyst specializing in international trade and supply chain finance. Provide concise, factual analysis.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
             )
 
-            return True
+            llm_response = response["message"]["content"]
+            ctx.logger.info(f"✅ LLM analysis received ({len(llm_response)} chars)")
+            return llm_response
 
         except Exception as e:
-            ctx.logger.error(f"Error setting up Pinecone: {e}")
-            return False
+            ctx.logger.warning(f"⚠️ LLM query failed: {e}")
+            return f"Financial analysis for {supplier_name} ({supplier_country}) trading with {user_country}."
 
-    async def _index_scraped_document(self, ctx: Context, document: Document) -> bool:
-        """Index a single scraped document in Pinecone"""
-        try:
-            if not self.index:
-                ctx.logger.error("Index not initialized")
-                return False
-
-            # Parse document into nodes (chunks)
-            parser = SimpleNodeParser.from_defaults(
-                chunk_size=512,
-                chunk_overlap=20,
-            )
-
-            nodes = parser.get_nodes_from_documents([document])
-
-            # Index nodes in Pinecone
-            for node in nodes:
-                try:
-                    self.index.insert_nodes([node])
-                except Exception as e:
-                    ctx.logger.warning(f"Error indexing node: {e}")
-
-            return True
-
-        except Exception as e:
-            ctx.logger.error(f"Error indexing document: {e}")
-            return False
-
-    async def query_financial_documents(
+    async def analyze_financial_risk(
         self,
         ctx: Context,
         supplier_name: str,
         industry: str,
-        b_corp_url: str = "",
+        b_corp_url: str,
+        user_country: str = "United States",
     ) -> Dict[str, Any]:
         """
-        Query RAG system for financial risk analysis - extract country from Headquarters only.
+        Analyze financial risk based on trade relationship between user's country and supplier's country.
 
-        Process:
-        1. Scrape B Corp page ONLY for Headquarters section to extract country
-        2. Apply country-specific financial risk analysis based on US trade relationships
-        3. Create simple document with country and analysis
-        4. Store in Pinecone and query for financial risk
-        5. Return structured financial data
+        Args:
+            ctx: Context for logging
+            supplier_name: Name of the supplier
+            industry: Industry/sector
+            b_corp_url: B Corp profile URL to scrape country from
+            user_country: User's country (default: United States)
 
         Returns:
-        {
-            "financial_score": float (0-100, higher is better/lower risk),
-            "financial_details": str,
-            "risk_factors": List[str],
-            "retrieved_context": str
-        }
+            Dictionary with financial_score, financial_details, risk_factors, supplier_country, user_country
         """
-        print(
-            f"Querying financial documents on line 385: {supplier_name}, {industry}, {b_corp_url}"
-        )
         if not self.initialized:
-            ctx.logger.error("RAG system not initialized")
-            return self._generate_fallback_response(supplier_name, "Unknown")
+            ctx.logger.error("System not initialized")
+            return self._generate_fallback_response(
+                supplier_name, "Unknown", user_country
+            )
 
         try:
-            # Step 1: Scrape B Corp page to extract country from Headquarters section ONLY
-
+            # Step 1: Scrape B Corp page to extract supplier country
             if not b_corp_url:
-                ctx.logger.error("No B Corp URL provided for financial analysis")
-                return self._generate_fallback_response(supplier_name, "Unknown")
+                ctx.logger.error("No B Corp URL provided")
+                return self._generate_fallback_response(
+                    supplier_name, "Unknown", user_country
+                )
 
-            # Scrape B Corp page to extract country from Headquarters section
-            ctx.logger.info(
-                f"Scraping B Corp Headquarters section to extract country..."
-            )
-            scraped_data = await self.scrape_bcorp_financial_page(
+            ctx.logger.info(f"Scraping B Corp page for supplier country...")
+            scraped_data = await self.scrape_bcorp_country(
                 ctx, supplier_name, b_corp_url
             )
 
             if "error" in scraped_data:
-                ctx.logger.error(f"B Corp scraping failed: {scraped_data.get('error')}")
-                return self._generate_fallback_response(supplier_name, "Unknown")
+                ctx.logger.error(f"Scraping failed: {scraped_data.get('error')}")
+                return self._generate_fallback_response(
+                    supplier_name, "Unknown", user_country
+                )
 
-            # Extract country from scraped data
-            country = scraped_data.get("country", "Unknown")
-            ctx.logger.info(f"📍 Country extracted from B Corp page: {country}")
+            supplier_country = scraped_data.get("country", "Unknown")
+            ctx.logger.info(f"📍 Supplier Country: {supplier_country}")
+            ctx.logger.info(f"📍 User Country: {user_country}")
 
-            # Step 2: Apply country-specific financial risk analysis
-            country_analysis = analyze_country_financial_risk(
-                scraped_data, country, ctx
+            # Step 2: Analyze trade relationship (rule-based scoring)
+            analysis = analyze_country_financial_risk(
+                supplier_country=supplier_country,
+                user_country=user_country,
+                ctx=ctx,
             )
 
-            # Step 3: Create simple document with country and analysis
-            financial_text = f"""
-            Supplier: {supplier_name}
-            Operating Country: {country}
-            Industry: {industry}
-            
-            FINANCIAL RISK ANALYSIS:
-            Based on US trade relationship with {country}:
-            Financial Score: {country_analysis['financial_score']}/100
-            Risk Factors: {', '.join(country_analysis['risk_factors'])}
-            """
-
-            print(f"Financial text on line 430: {financial_text}")
-
-            # Create Document object
-            doc = Document(
-                text=financial_text,
-                metadata={
-                    "supplier_name": supplier_name,
-                    "country": country,
-                    "source": "bcorp_financial_analysis",
-                    "url": b_corp_url or "",
-                },
+            # Step 3: Generate prompt and query LLM for detailed analysis
+            prompt = finance_prompt(
+                supplier_name, industry, supplier_country, user_country
+            )
+            ctx.logger.info(
+                f"Generated finance prompt for {user_country}-{supplier_country} trade"
             )
 
-            print(f"Document on line 443: {doc}")
-
-            # Step 4: Index the document in Pinecone
-            await self._index_scraped_document(ctx, doc)
-
-            # Step 5: Query RAG system
-            query = finance_prompt(supplier_name, industry, country)
-
-            # Query using the indexed data
-            rag_response = self.query_engine.query(query)
-            response_text = str(rag_response)
-
-            # Step 6: Parse response and merge with country-specific analysis
-            result = await self._parse_rag_response(
-                ctx, response_text, supplier_name, country
+            # Query Ollama LLM for detailed reasoning
+            llm_analysis = self._query_llm_for_analysis(
+                ctx=ctx,
+                prompt=prompt,
+                supplier_name=supplier_name,
+                supplier_country=supplier_country,
+                user_country=user_country,
             )
 
-            # Use country-specific score and risk factors
-            result["financial_score"] = country_analysis["financial_score"]
-            result["risk_factors"] = country_analysis["risk_factors"]
-
-            # Build country-specific financial details
-            is_us = "united states" in country.lower() or "usa" in country.lower()
-            if is_us:
-                result["financial_details"] = (
-                    f"US domestic supplier analysis for {supplier_name}. No import tariffs apply. "
-                    f"Analysis based on US economic conditions."
+            # Build financial details combining rule-based score with LLM analysis
+            if supplier_country.lower() == user_country.lower():
+                financial_details = (
+                    f"Domestic trade analysis for {supplier_name}. "
+                    f"Both buyer and supplier are in {user_country}. "
+                    f"No import tariffs or international trade barriers apply. "
+                    f"Score: {analysis['financial_score']}/100. "
+                    f"\n\nLLM Analysis: {llm_analysis}"
                 )
             else:
-                result["financial_details"] = (
-                    f"International supplier analysis for {supplier_name} from {country}. "
-                    f"Financial risk evaluated based on US-{country} trade relationship. "
-                    f"Score: {country_analysis['financial_score']}/100."
+                financial_details = (
+                    f"International trade analysis for {supplier_name} from {supplier_country}. "
+                    f"Buyer located in {user_country}. "
+                    f"Trade relationship: {analysis.get('trade_relationship', 'Standard international')}. "
+                    f"Score: {analysis['financial_score']}/100. "
+                    f"\n\nLLM Analysis: {llm_analysis}"
                 )
 
-            return result
-
-        except Exception as e:
-            ctx.logger.error(f"Query failed: {e}")
-            import traceback
-
-            traceback.print_exc()
-            return self._generate_fallback_response(supplier_name, "Unknown")
-
-    async def _parse_rag_response(
-        self, ctx: Context, response_text: str, supplier_name: str, country: str
-    ) -> Dict[str, Any]:
-        """Parse LLM response and extract structured financial data"""
-        try:
-            # Initialize defaults
-            financial_score = 50.0
-            financial_details = "Insufficient financial data"
-            risk_factors = []
-
-            # Parse response
-            lines = response_text.split("\n")
-
-            print(f"Lines on line 499: {lines}")
-
-            for i, line in enumerate(lines):
-                line_lower = line.lower()
-
-                if "financial_score:" in line_lower:
-                    try:
-                        score_str = line.split(":")[-1].strip().split()[0]
-                        financial_score = max(0, min(100, float(score_str)))
-                    except (ValueError, IndexError):
-                        pass
-
-                elif "financial_details:" in line_lower:
-                    # Extract content after "financial_details:"
-                    content = line.split(":", 1)[-1].strip()
-
-                    # If this line is minimal, look ahead for more content
-                    if not content or len(content) < 30:
-                        for next_line in lines[i + 1 :]:
-                            next_line_lower = next_line.lower()
-                            # Stop if we hit another field marker
-                            if ":" in next_line and any(
-                                field in next_line_lower
-                                for field in ["risk_factors", "financial_score"]
-                            ):
-                                break
-                            if next_line.strip():
-                                content += " " + next_line.strip()
-                            else:
-                                break
-
-                    # Fix concatenation issues
-                    content = re.sub(r"(\w)([A-Z][a-z])", r"\1 \2", content)
-                    content = re.sub(r"\s+", " ", content).strip()
-
-                    if content:
-                        financial_details = content
-
-                elif "risk_factors:" in line_lower:
-                    factors_str = line.split(":", 1)[-1].strip().lower()
-                    if (
-                        factors_str
-                        and "minimal" not in factors_str
-                        and "none" not in factors_str
-                    ):
-                        risk_factors = [f.strip() for f in factors_str.split(",")]
-
-            print(f"Financial score on line 547: {financial_score}")
-            print(f"Financial details on line 548: {financial_details}")
-            print(f"Risk factors on line 549: {risk_factors}")
-            print(f"Retrieved context on line 550: {response_text}")
-
             return {
-                "financial_score": float(financial_score),
-                "financial_details": financial_details
-                or "No financial information available",
-                "risk_factors": risk_factors,
-                "retrieved_context": response_text,
+                "financial_score": analysis["financial_score"],
+                "financial_details": financial_details,
+                "risk_factors": analysis["risk_factors"],
+                "supplier_country": supplier_country,
+                "user_country": user_country,
             }
 
         except Exception as e:
-            ctx.logger.error(f"Error parsing RAG response: {e}")
+            ctx.logger.error(f"Analysis failed: {e}")
             import traceback
 
             traceback.print_exc()
-            return self._generate_fallback_response(supplier_name, "Unknown")
+            return self._generate_fallback_response(
+                supplier_name, "Unknown", user_country
+            )
 
     def _generate_fallback_response(
-        self, supplier_name: str, country: str = "Unknown"
+        self, supplier_name: str, supplier_country: str, user_country: str
     ) -> Dict[str, Any]:
-        """Generate fallback response when RAG is unavailable"""
+        """Generate fallback response when analysis fails"""
         return {
-            "financial_score": 50.0,  # Neutral score
-            "financial_details": f"Unable to retrieve tariff/inflation information for {country}",
-            "risk_factors": ["Data retrieval unavailable"],
-            "retrieved_context": "Fallback mode - RAG system unavailable",
+            "financial_score": 50.0,
+            "financial_details": f"Unable to analyze trade relationship between {user_country} and {supplier_country}",
+            "risk_factors": ["Analysis unavailable"],
+            "supplier_country": supplier_country,
+            "user_country": user_country,
         }
 
-    def query_financial_documents_sync(
-        self,
-        supplier_name: str,
-        industry: str,
-        b_corp_url: str = "",
-    ) -> Dict[str, Any]:
-        """Synchronous wrapper for query_financial_documents for use in LangGraph nodes"""
-        import asyncio
 
-        # Create a mock context for sync execution
-        class MockContext:
-            def __init__(self):
-                self.logs = []
+# ============================================================================
+# COUNTRY-SPECIFIC ANALYSIS
+# ============================================================================
 
-            class Logger:
-                def __init__(self, parent):
-                    self.parent = parent
 
-                def info(self, msg):
-                    pass
+def analyze_country_financial_risk(
+    supplier_country: str,
+    user_country: str,
+    ctx: Context,
+) -> Dict[str, Any]:
+    """
+    Analyze financial risk based on trade relationship between user's country and supplier's country.
 
-                def error(self, msg):
-                    pass
+    Scoring guidance:
+    - 75-100: minimal financial risks (same country, free trade agreements, same trade bloc)
+    - 60-74: moderate risk (some tariffs, different trade blocs but stable)
+    - 40-59: significant risk (high tariffs, trade tensions)
+    - Below 40: high risk (sanctions, severe trade restrictions)
 
-                def warning(self, msg):
-                    pass
+    Args:
+        supplier_country: Country where supplier operates
+        user_country: Country where user/buyer is located
+        ctx: Context for logging
 
-            @property
-            def logger(self):
-                return self.Logger(self)
+    Returns:
+        Dictionary with financial_score, risk_factors, trade_relationship
+    """
+    supplier_lower = supplier_country.lower() if supplier_country else ""
+    user_lower = user_country.lower() if user_country else ""
 
-        try:
-            mock_ctx = MockContext()
-            try:
-                # Try to get current running loop
-                loop = asyncio.get_running_loop()
-                # If we're here, a loop is running, use a different approach
-                import concurrent.futures
+    # Start with moderate baseline score
+    score = 65.0
+    risk_factors = []
+    trade_relationship = "Standard international trade"
 
-                def run_async():
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        return new_loop.run_until_complete(
-                            self.query_financial_documents(
-                                ctx=mock_ctx,
-                                supplier_name=supplier_name,
-                                industry=industry,
-                                b_corp_url=b_corp_url,
-                            )
-                        )
-                    finally:
-                        new_loop.close()
+    # Define trade blocs and agreements
+    eu_countries = [
+        "spain",
+        "germany",
+        "france",
+        "italy",
+        "netherlands",
+        "belgium",
+        "portugal",
+        "greece",
+        "ireland",
+        "austria",
+        "poland",
+        "sweden",
+        "denmark",
+        "finland",
+        "czech republic",
+        "hungary",
+        "romania",
+        "bulgaria",
+        "croatia",
+        "slovakia",
+        "slovenia",
+        "estonia",
+        "latvia",
+        "lithuania",
+        "luxembourg",
+        "malta",
+        "cyprus",
+    ]
 
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(run_async)
-                    result = future.result(timeout=600)  # 10 minute timeout
-                    return result
-            except RuntimeError:
-                # No event loop running, use asyncio.run()
-                result = asyncio.run(
-                    self.query_financial_documents(
-                        ctx=mock_ctx,
-                        supplier_name=supplier_name,
-                        industry=industry,
-                        b_corp_url=b_corp_url,
-                    )
-                )
-                return result
-        except Exception as e:
-            import traceback
+    usmca_countries = ["united states", "usa", "canada", "mexico"]
 
-            traceback.print_exc()
-            return self._generate_fallback_response(supplier_name, "Unknown")
+    latin_american_countries = [
+        "argentina",
+        "brazil",
+        "chile",
+        "colombia",
+        "peru",
+        "uruguay",
+        "venezuela",
+        "ecuador",
+        "bolivia",
+        "paraguay",
+    ]
+
+    high_tariff_countries = ["china", "russia"]
+
+    sanctioned_countries = ["russia", "north korea", "iran", "syria", "cuba"]
+
+    # Normalize country names
+    user_is_eu = any(c in user_lower for c in eu_countries)
+    user_is_usmca = any(c in user_lower for c in usmca_countries)
+
+    supplier_is_eu = any(c in supplier_lower for c in eu_countries)
+    supplier_is_usmca = any(c in supplier_lower for c in usmca_countries)
+    supplier_is_latin = any(c in supplier_lower for c in latin_american_countries)
+    supplier_is_high_tariff = any(c in supplier_lower for c in high_tariff_countries)
+    supplier_is_sanctioned = any(c in supplier_lower for c in sanctioned_countries)
+
+    # CASE 1: Same country (domestic trade)
+    if (
+        supplier_lower == user_lower
+        or ("united states" in supplier_lower and "united states" in user_lower)
+        or ("usa" in supplier_lower and "usa" in user_lower)
+    ):
+        ctx.logger.info(f"📍 Domestic trade - both in same country")
+        score = 90.0
+        risk_factors = ["no_import_tariffs", "domestic_supply_chain"]
+        trade_relationship = "Domestic trade"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 2: Sanctioned country supplier
+    if supplier_is_sanctioned:
+        ctx.logger.info(f"📍 Supplier in sanctioned country")
+        score = 20.0
+        risk_factors = ["international_sanctions", "trade_restrictions", "high_risk"]
+        trade_relationship = "Sanctioned country - HIGH RISK"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 3: EU to EU trade (no tariffs within EU)
+    if user_is_eu and supplier_is_eu:
+        ctx.logger.info(f"📍 EU-EU trade - no internal tariffs")
+        score = 88.0
+        risk_factors = ["eu_single_market", "no_tariffs", "free_movement"]
+        trade_relationship = "EU Single Market - Free Trade"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 4: USMCA trade (US-Canada-Mexico free trade)
+    if user_is_usmca and supplier_is_usmca:
+        ctx.logger.info(f"📍 USMCA trade - free trade agreement")
+        score = 85.0
+        risk_factors = ["usmca_agreement", "low_tariffs", "integrated_supply_chain"]
+        trade_relationship = "USMCA Free Trade Agreement"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 5: High tariff country supplier (China, etc.)
+    if supplier_is_high_tariff:
+        ctx.logger.info(f"📍 Supplier in high tariff country")
+        if "china" in supplier_lower:
+            score = 50.0
+            risk_factors = [
+                "elevated_tariffs",
+                "trade_tensions",
+                "supply_chain_considerations",
+            ]
+            trade_relationship = f"High tariff environment ({user_country}-China)"
+        else:
+            score = 45.0
+            risk_factors = ["trade_restrictions", "economic_considerations"]
+            trade_relationship = "Elevated trade restrictions"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 6: US/USMCA user importing from EU
+    if user_is_usmca and supplier_is_eu:
+        ctx.logger.info(f"📍 USMCA-EU trade")
+        score = 72.0
+        risk_factors = [
+            "standard_tariffs",
+            "stable_trade_relationship",
+            "currency_exchange",
+        ]
+        trade_relationship = "USMCA-EU Standard Trade"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 7: EU user importing from US/USMCA
+    if user_is_eu and supplier_is_usmca:
+        ctx.logger.info(f"📍 EU-USMCA trade")
+        score = 72.0
+        risk_factors = [
+            "standard_tariffs",
+            "stable_trade_relationship",
+            "currency_exchange",
+        ]
+        trade_relationship = "EU-USMCA Standard Trade"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 8: Latin American supplier
+    if supplier_is_latin:
+        ctx.logger.info(f"📍 Latin American supplier")
+
+        # Check for specific trade agreements
+        if "chile" in supplier_lower or "peru" in supplier_lower:
+            score = 68.0
+            risk_factors = ["bilateral_trade_agreement", "emerging_market"]
+            trade_relationship = "Bilateral trade agreement"
+        elif "argentina" in supplier_lower:
+            score = 58.0
+            risk_factors = ["economic_volatility", "currency_risk", "emerging_market"]
+            trade_relationship = "Emerging market with volatility"
+        else:
+            score = 62.0
+            risk_factors = ["emerging_market", "currency_considerations"]
+            trade_relationship = "Latin American trade"
+            return {
+                "financial_score": score,
+                "risk_factors": risk_factors,
+                "trade_relationship": trade_relationship,
+            }
+
+    # CASE 9: Developed economies (Japan, South Korea, Australia, Singapore)
+    developed_economies = [
+        "japan",
+        "south korea",
+        "australia",
+        "singapore",
+        "new zealand",
+    ]
+    if any(c in supplier_lower for c in developed_economies):
+        ctx.logger.info(f"📍 Developed economy supplier")
+        score = 74.0
+        risk_factors = ["stable_economy", "reliable_trade_partner", "standard_tariffs"]
+        trade_relationship = "Developed economy - stable trade"
+        return {
+            "financial_score": score,
+            "risk_factors": risk_factors,
+            "trade_relationship": trade_relationship,
+        }
+
+    # CASE 10: Default - standard international trade
+    ctx.logger.info(f"📍 Standard international trade")
+    score = 64.0
+    risk_factors = [
+        "standard_international_tariffs",
+        "currency_exchange",
+        "import_duties",
+    ]
+    trade_relationship = f"Standard international ({user_country}-{supplier_country})"
+
+    return {
+        "financial_score": max(0.0, min(100.0, score)),
+        "risk_factors": risk_factors,
+        "trade_relationship": trade_relationship,
+    }
+
+
+# ============================================================================
+# LANGGRAPH WORKFLOW NODES
+# ============================================================================
 
 
 def financial_check_node(
-    state: SupplierWorkflowState, rag_system: FinancialRAGSystem, ctx: Context
+    state: SupplierWorkflowState,
+    analysis_system: FinancialAnalysisSystem,
+    ctx: Context,
 ) -> SupplierWorkflowState:
     """
-    Node 1: Run financial risk check - extract country from Headquarters only.
+    Node 1: Run financial risk check.
 
     Process:
-    1. Get supplier name and B Corp URL from state
-    2. Scrape B Corp page ONLY for Headquarters section to extract country
-    3. Apply country-specific financial risk analysis based on US trade relationships
-    4. Store in Pinecone and analyze with RAG
-    5. Return financial score and details
-
-    Input: supplier_name, industry, b_corp_profile_url
-    Output: financial_score, financial_info, risk_factors
+    1. Get supplier name, B Corp URL, and user country from state
+    2. Scrape B Corp page for supplier country
+    3. Analyze trade relationship between user country and supplier country
+    4. Return financial score and details
     """
     try:
         supplier_name = state.get("supplier_name", "Unknown")
         b_corp_url = state.get("b_corp_profile_url", "")
+        user_country = state.get("user_country", "United States")
 
         if not b_corp_url:
             ctx.logger.error("No B Corp URL provided for financial analysis")
             state["current_step"] = "financial_check_failed"
-            state["error_message"] = "No B Corp URL available to extract country"
+            state["error_message"] = "No B Corp URL available"
             state["financial_score"] = 0.0
             return state
 
-        # Run RAG query for financial analysis (extracts country from Headquarters ONLY)
-        ctx.logger.info(
-            f"Financial analysis will scrape B Corp Headquarters section to extract country..."
-        )
-        rag_result = rag_system.query_financial_documents_sync(
-            supplier_name=supplier_name,
-            industry=state.get("industry", ""),
-            b_corp_url=b_corp_url,
-        )
+        ctx.logger.info(f"Financial analysis: {user_country} buyer ↔ {supplier_name}")
 
-        # Update state with financial results including risk_factors
-        state["financial_score"] = rag_result.get("financial_score", 0.0)
-        state["financial_info"] = rag_result.get("financial_details", "N/A")
-        state["risk_factors"] = rag_result.get("risk_factors", [])
+        # Run analysis synchronously
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+
+            def run_async():
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+                try:
+                    return new_loop.run_until_complete(
+                        analysis_system.analyze_financial_risk(
+                            ctx=ctx,
+                            supplier_name=supplier_name,
+                            industry=state.get("industry", ""),
+                            b_corp_url=b_corp_url,
+                            user_country=user_country,
+                        )
+                    )
+                finally:
+                    new_loop.close()
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(run_async)
+            result = future.result(timeout=120)
+        except RuntimeError:
+            result = asyncio.run(
+                analysis_system.analyze_financial_risk(
+                    ctx=ctx,
+                    supplier_name=supplier_name,
+                    industry=state.get("industry", ""),
+                    b_corp_url=b_corp_url,
+                    user_country=user_country,
+                )
+            )
+
+        # Update state with results
+        state["financial_score"] = result.get("financial_score", 0.0)
+        state["financial_info"] = result.get("financial_details", "N/A")
+        state["risk_factors"] = result.get("risk_factors", [])
+        state["supplier_country"] = result.get("supplier_country", "Unknown")
+        state["user_country"] = result.get("user_country", user_country)
         state["current_step"] = "financial_check_complete"
 
         ctx.logger.info(f"Financial analysis complete")
-        ctx.logger.info(f"Score: {state['financial_score']}/100")
-        ctx.logger.info(f"Risk factors: {state['risk_factors']}")
+        ctx.logger.info(f"  User Country: {state['user_country']}")
+        ctx.logger.info(f"  Supplier Country: {state['supplier_country']}")
+        ctx.logger.info(f"  Score: {state['financial_score']}/100")
 
         return state
 
@@ -721,237 +857,42 @@ def financial_router(
     Node 2: Conditional routing based on financial score.
 
     Routes to:
-    - "success_node" if score >= 70 (APPROVED - lower risk)
-    - "error_node" if score < 70 OR error occurred (REJECTED - higher risk)
+    - "success_node" if score >= 60 (APPROVED)
+    - "error_node" if score < 60 OR error occurred (REJECTED)
     """
     financial_score = state.get("financial_score", 0.0)
     error_message = state.get("error_message")
 
-    # Check for errors first
     if error_message:
         return "error_node"
 
-    # Check financial threshold (60+ means acceptable financial health)
     if financial_score >= 60:
         return "success_node"
     else:
         state["error_message"] = (
-            f"Financial score {financial_score}/100 below threshold (60). Financial risk too high."
+            f"Financial score {financial_score}/100 below threshold (60)."
         )
         return "error_node"
 
 
 def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
-    """
-    Node 3a: Success path - Country meets financial requirements.
-    """
+    """Node 3a: Success path - Financial requirements met."""
     state["current_step"] = "financial_approved"
     state["should_continue"] = False
-
+    ctx.logger.info(
+        f"✅ Financial APPROVED - Score: {state.get('financial_score', 0)}/100"
+    )
     return state
 
 
 def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
-    """
-    Node 3b: Error path - Country does not meet requirements.
-    """
+    """Node 3b: Error path - Financial requirements not met."""
     state["current_step"] = "financial_rejected"
     state["should_continue"] = False
-
-    return state
-
-
-# ============================================================================
-# COUNTRY-SPECIFIC ANALYSIS HELPERS
-# ============================================================================
-
-
-def analyze_country_financial_risk(
-    scraped_data: Dict[str, Any], country: str, ctx: Context
-) -> Dict[str, Any]:
-    """
-    Analyze financial risk based on country and US trade relationships.
-
-    Follows finance_prompt scoring guidance:
-    - 75-100: minimal financial risks (low tariffs, stable inflation)
-    - 60-74: moderate risk (some tariffs, manageable inflation)
-    - 40-59: significant risk (high tariffs or inflation concerns)
-    - Below 40: high risk (severe tariffs, economic instability)
-
-    Be fair in evaluation - don't be overly harsh on countries with some trade restrictions.
-    Consider: tariff rates, trade agreements, currency stability, US relationship
-    """
-    country_lower = country.lower() if country else ""
-    full_content = scraped_data.get("full_content", "").lower()
-
-    # Start with moderate baseline score (per prompt guidance)
-    score = 65.0  # Start in moderate range
-    risk_factors = []
-
-    # Check if supplier is in the United States
-    is_us_supplier = (
-        "united states" in country_lower
-        or "usa" in country_lower
-        or "u.s." in country_lower
+    ctx.logger.info(
+        f"❌ Financial REJECTED - Score: {state.get('financial_score', 0)}/100"
     )
-
-    # Define trade relationship categories
-
-    # Countries with US Free Trade Agreements (lower tariff risk)
-    usmca_countries = ["mexico", "canada"]  # USMCA (formerly NAFTA)
-
-    # Latin American countries (emerging market risks)
-    latin_american_countries = [
-        "argentina",
-        "brazil",
-        "chile",
-        "colombia",
-        "mexico",
-        "peru",
-        "uruguay",
-        "venezuela",
-        "ecuador",
-        "bolivia",
-        "paraguay",
-    ]
-
-    # EU countries (generally favorable trade)
-    eu_countries = [
-        "spain",
-        "germany",
-        "france",
-        "italy",
-        "netherlands",
-        "belgium",
-        "portugal",
-        "greece",
-        "ireland",
-        "austria",
-        "poland",
-        "sweden",
-        "denmark",
-        "finland",
-        "czech republic",
-        "hungary",
-        "romania",
-    ]
-
-    # High tariff risk countries
-    high_tariff_countries = ["china", "russia"]
-
-    is_latin_american = any(c in country_lower for c in latin_american_countries)
-    is_usmca = any(c in country_lower for c in usmca_countries)
-    is_eu = any(c in country_lower for c in eu_countries)
-    is_high_tariff = any(c in country_lower for c in high_tariff_countries)
-
-    if is_us_supplier:
-        # US Domestic Supplier Analysis
-        # Score: 85-95 (minimal financial risks per prompt)
-        ctx.logger.info(
-            f"📍 US Supplier - No import tariffs, domestic economic analysis"
-        )
-
-        score = 88.0  # Minimal risk range (75-100)
-        risk_factors.append("no_import_tariffs")
-        risk_factors.append("domestic_supply_chain")
-
-        # US suppliers - no tariff concerns, only domestic economic factors
-        # B Corp certification indicates stable operations
-
-    elif is_high_tariff:
-        # High Tariff Countries (China, Russia, etc.)
-        # Score: 40-55 (significant to high risk per prompt)
-        ctx.logger.info(f"📍 {country} Supplier - Elevated tariff environment")
-
-        if "china" in country_lower:
-            score = 48.0  # Significant risk range (40-59)
-            risk_factors.append("higher_us_tariffs_applicable")
-            risk_factors.append("trade_relationship_considerations")
-            # Note: Being fair per prompt - not subtracting 40 points
-        elif "russia" in country_lower:
-            score = 35.0  # High risk (below 40) due to sanctions
-            risk_factors.append("international_sanctions")
-            risk_factors.append("supply_chain_complexity")
-
-    elif is_usmca:
-        # USMCA Countries (Mexico, Canada) - Free Trade Agreement
-        # Score: 80-90 (minimal financial risks per prompt)
-        ctx.logger.info(f"📍 {country} Supplier - USMCA free trade partner")
-
-        score = 82.0  # Minimal risk range (75-100)
-        risk_factors.append("usmca_free_trade_agreement")
-        risk_factors.append("low_to_no_tariffs")
-
-        if "mexico" in country_lower:
-            risk_factors.append("strong_trade_partner")
-        elif "canada" in country_lower:
-            risk_factors.append("stable_economic_partner")
-
-    elif is_eu:
-        # European Union Countries
-        # Score: 70-80 (minimal to moderate risk per prompt)
-        ctx.logger.info(f"📍 {country} (EU) Supplier - European trade analysis")
-
-        score = 72.0  # Moderate to minimal range (60-74 / 75-100)
-        risk_factors.append("eu_trade_relationship")
-        risk_factors.append("standard_import_duties")
-
-        # Major EU trading partners
-        if any(c in country_lower for c in ["spain", "germany", "france", "italy"]):
-            score = 76.0  # Bump to minimal risk
-            risk_factors.append("major_trading_partner")
-
-    elif is_latin_american:
-        # Latin American Countries (non-USMCA)
-        # Score: 55-70 (moderate to significant risk per prompt)
-        ctx.logger.info(f"📍 {country} Supplier - Latin American emerging market")
-
-        score = 62.0  # Moderate risk range (60-74)
-        risk_factors.append("emerging_market_considerations")
-        risk_factors.append("currency_exchange_factors")
-
-        # Argentina has economic volatility
-        if "argentina" in country_lower:
-            score = 58.0  # Still moderate, not overly harsh
-            risk_factors.append("economic_volatility_factors")
-
-        # Chile and Peru have favorable trade agreements
-        if any(c in country_lower for c in ["chile", "peru"]):
-            score = 68.0  # Better moderate score
-            risk_factors.append("bilateral_trade_agreement")
-
-    else:
-        # Other International Countries
-        # Score: 60-70 (moderate risk per prompt)
-        ctx.logger.info(f"📍 {country} Supplier - Standard international trade")
-
-        score = 64.0  # Moderate risk range (60-74)
-        risk_factors.append("standard_international_tariffs")
-        risk_factors.append("import_duty_applicable")
-
-        # Asia-Pacific developed economies (excluding China)
-        if any(
-            c in country_lower
-            for c in ["japan", "south korea", "singapore", "australia"]
-        ):
-            score = 74.0  # Upper moderate range
-            risk_factors.append("developed_economy")
-            risk_factors.append("stable_trade_relations")
-
-        # India - developing market
-        if "india" in country_lower:
-            score = 60.0  # Lower moderate range
-            risk_factors.append("developing_market")
-            risk_factors.append("tariff_considerations")
-
-    # Ensure score is within bounds
-    final_score = max(0.0, min(100.0, score))
-
-    return {
-        "financial_score": final_score,
-        "risk_factors": risk_factors,
-        "country_analyzed": country,
-    }
+    return state
 
 
 # ============================================================================
@@ -960,7 +901,7 @@ def analyze_country_financial_risk(
 
 
 def build_financial_workflow(
-    rag_system: FinancialRAGSystem, ctx: Context
+    analysis_system: FinancialAnalysisSystem, ctx: Context
 ) -> StateGraph:
     """
     Build the LangGraph financial workflow.
@@ -968,7 +909,7 @@ def build_financial_workflow(
     Flow:
     START
         ↓
-    financial_check_node (Extract country from Headquarters ONLY + Apply country-based analysis + Run RAG)
+    financial_check_node (Scrape country + Analyze trade relationship)
         ↓
     financial_router (Check score >= 60)
         ├─→ success_node (Score >= 60) → END
@@ -977,12 +918,12 @@ def build_financial_workflow(
     Returns:
         Compiled StateGraph workflow
     """
-    # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
 
     # Add nodes
     workflow.add_node(
-        "financial_check", lambda state: financial_check_node(state, rag_system, ctx)
+        "financial_check",
+        lambda state: financial_check_node(state, analysis_system, ctx),
     )
     workflow.add_node("success_node", lambda state: success_node(state, ctx))
     workflow.add_node("error_node", lambda state: error_node(state, ctx))
@@ -1000,8 +941,11 @@ def build_financial_workflow(
     workflow.add_edge("success_node", END)
     workflow.add_edge("error_node", END)
 
-    # Compile workflow
     compiled_workflow = workflow.compile()
-    print(f"Compiled workflow on line 987: {compiled_workflow}")
+    ctx.logger.info("Financial workflow compiled (with Ollama LLM, no Pinecone)")
 
     return compiled_workflow
+
+
+# Backwards compatibility alias
+FinancialRAGSystem = FinancialAnalysisSystem
