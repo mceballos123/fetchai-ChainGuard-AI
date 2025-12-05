@@ -143,6 +143,161 @@ def determine_product_category(user_query: str) -> str:
     return "food"
 
 
+def extract_user_country(user_query: str) -> str:
+    """
+    Extract the user's country from their query.
+
+    Looks for patterns like:
+    - "I'm a United Kingdom business owner"
+    - "I'm in Germany"
+    - "I'm from Spain"
+    - "I am a UK business"
+    - "I'm a German company"
+
+    Args:
+        user_query: The user's search query
+
+    Returns:
+        Country name (default: "United States")
+    """
+    query_lower = user_query.lower()
+
+    # List of countries to look for (with variations)
+    countries = {
+        # UK variations
+        "united kingdom": "United Kingdom",
+        "uk": "United Kingdom",
+        "british": "United Kingdom",
+        "britain": "United Kingdom",
+        "england": "United Kingdom",
+        "scotland": "United Kingdom",
+        "wales": "United Kingdom",
+        # US variations
+        "united states": "United States",
+        "usa": "United States",
+        "us": "United States",
+        "american": "United States",
+        "america": "United States",
+        # EU countries
+        "germany": "Germany",
+        "german": "Germany",
+        "france": "France",
+        "french": "France",
+        "spain": "Spain",
+        "spanish": "Spain",
+        "italy": "Italy",
+        "italian": "Italy",
+        "netherlands": "Netherlands",
+        "dutch": "Netherlands",
+        "holland": "Netherlands",
+        "belgium": "Belgium",
+        "belgian": "Belgium",
+        "portugal": "Portugal",
+        "portuguese": "Portugal",
+        "austria": "Austria",
+        "austrian": "Austria",
+        "ireland": "Ireland",
+        "irish": "Ireland",
+        "sweden": "Sweden",
+        "swedish": "Sweden",
+        "norway": "Norway",
+        "norwegian": "Norway",
+        "denmark": "Denmark",
+        "danish": "Denmark",
+        "finland": "Finland",
+        "finnish": "Finland",
+        "poland": "Poland",
+        "polish": "Poland",
+        "greece": "Greece",
+        "greek": "Greece",
+        "czech": "Czech Republic",
+        "hungary": "Hungary",
+        "hungarian": "Hungary",
+        "romania": "Romania",
+        "romanian": "Romania",
+        # Other developed economies
+        "canada": "Canada",
+        "canadian": "Canada",
+        "australia": "Australia",
+        "australian": "Australia",
+        "new zealand": "New Zealand",
+        "japan": "Japan",
+        "japanese": "Japan",
+        "south korea": "South Korea",
+        "korean": "South Korea",
+        "singapore": "Singapore",
+        "singaporean": "Singapore",
+        "switzerland": "Switzerland",
+        "swiss": "Switzerland",
+        # Latin America
+        "mexico": "Mexico",
+        "mexican": "Mexico",
+        "brazil": "Brazil",
+        "brazilian": "Brazil",
+        "argentina": "Argentina",
+        "argentinian": "Argentina",
+        "chile": "Chile",
+        "chilean": "Chile",
+        "colombia": "Colombia",
+        "colombian": "Colombia",
+        "peru": "Peru",
+        "peruvian": "Peru",
+        # Asia
+        "china": "China",
+        "chinese": "China",
+        "india": "India",
+        "indian": "India",
+        "taiwan": "Taiwan",
+        "taiwanese": "Taiwan",
+        "thailand": "Thailand",
+        "thai": "Thailand",
+        "vietnam": "Vietnam",
+        "vietnamese": "Vietnam",
+        "indonesia": "Indonesia",
+        "indonesian": "Indonesia",
+        "malaysia": "Malaysia",
+        "malaysian": "Malaysia",
+        "philippines": "Philippines",
+        "filipino": "Philippines",
+        # Middle East / Africa
+        "israel": "Israel",
+        "israeli": "Israel",
+        "united arab emirates": "United Arab Emirates",
+        "uae": "United Arab Emirates",
+        "dubai": "United Arab Emirates",
+        "saudi arabia": "Saudi Arabia",
+        "saudi": "Saudi Arabia",
+        "south africa": "South Africa",
+        "south african": "South Africa",
+        "egypt": "Egypt",
+        "egyptian": "Egypt",
+        "morocco": "Morocco",
+        "moroccan": "Morocco",
+        "kenya": "Kenya",
+        "kenyan": "Kenya",
+        "nigeria": "Nigeria",
+        "nigerian": "Nigeria",
+        # Other
+        "turkey": "Turkey",
+        "turkish": "Turkey",
+        "russia": "Russia",
+        "russian": "Russia",
+        "ukraine": "Ukraine",
+        "ukrainian": "Ukraine",
+    }
+
+    # Check for country mentions (longer matches first to avoid partial matches)
+    # Sort by length descending to check longer matches first
+    sorted_countries = sorted(countries.keys(), key=len, reverse=True)
+
+    for country_key in sorted_countries:
+        if country_key in query_lower:
+            return countries[country_key]
+
+    # Default to United States if no country found
+    return "United States"
+
+
 # Supabase configuration for monitoring data storage
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -746,15 +901,22 @@ async def handle_compliance_response(
         ctx.logger.info(f"Agent Address: {FINANCIAL_AGENT_ADDRESS}")
         ctx.logger.info(f"Request ID: {msg.request_id}")
 
-        # Financial agent will scrape B Corp URL to extract country
+        # Financial agent will scrape B Corp URL to extract supplier country
         b_corp_url = best_supplier_data.get("b_corp_profile_url", "")
-        ctx.logger.info(f"B Corp URL (will be scraped for country): {b_corp_url}")
+        ctx.logger.info(
+            f"B Corp URL (will be scraped for supplier country): {b_corp_url}"
+        )
+
+        # Extract user's country from their query (e.g., "I'm a UK business owner")
+        user_country = extract_user_country(user_query or "")
+        ctx.logger.info(f"User Country (extracted from query): {user_country}")
 
         financial_request = FinancialRequest(
             request_id=msg.request_id,
             supplier_name=best_supplier_data.get("company_name"),
             industry=best_supplier_data.get("industry", "general"),
             b_corp_profile_url=b_corp_url,
+            user_country=user_country,  # User's country extracted from query
             timestamp="",
         )
 
@@ -762,7 +924,8 @@ async def handle_compliance_response(
         ctx.logger.info(f"  - Supplier: {financial_request.supplier_name}")
         ctx.logger.info(f"  - B Corp URL: {financial_request.b_corp_profile_url}")
         ctx.logger.info(f"  - Industry: {financial_request.industry}")
-        ctx.logger.info(f"  - Country will be scraped from B Corp page")
+        ctx.logger.info(f"  - User Country: {financial_request.user_country}")
+        ctx.logger.info(f"  - Supplier Country will be scraped from B Corp page")
 
         await ctx.send(FINANCIAL_AGENT_ADDRESS, financial_request)
 
@@ -775,6 +938,7 @@ async def handle_compliance_response(
                 "supplier_name": financial_request.supplier_name,
                 "b_corp_profile_url": financial_request.b_corp_profile_url,
                 "industry": financial_request.industry,
+                "user_country": financial_request.user_country,
             },
         )
 

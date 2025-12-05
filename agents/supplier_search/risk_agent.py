@@ -8,7 +8,7 @@ from datetime import datetime
 from models.risk import RiskRequest, RiskResponse
 from dotenv import load_dotenv
 from langgraph_logic.risk_langgraph import (
-    RiskRAGSystem,
+    RiskAnalysisSystem,
     build_risk_workflow,
 )
 from langgraph_logic.state_schemas import SupplierWorkflowState
@@ -30,28 +30,31 @@ risk_agent = Agent(
 
 risk_protocol = Protocol(name="risk_protocol", version="1.0")
 
-rag_system = None
+analysis_system = None
 risk_workflow = None
 
 
 @risk_agent.on_event("startup")
 async def startup(ctx: Context):
-    """Initialize agent, RAG system, and LangGraph workflow on startup"""
+    """Initialize agent, analysis system, and LangGraph workflow on startup"""
     ctx.logger.info("Risk Management Agent starting up...")
 
-    # Initialize RAG system
-    global rag_system, risk_workflow
-    if rag_system is None:
-        rag_system = RiskRAGSystem()
+    # Initialize analysis system (uses Ollama LLM, no RAG/Pinecone)
+    global analysis_system, risk_workflow
+    if analysis_system is None:
+        analysis_system = RiskAnalysisSystem()
 
-    success = await rag_system.initialize(ctx)
+    success = await analysis_system.initialize(ctx)
 
     if success:
+        ctx.logger.info("Risk Agent ready with Ollama LLM!")
+
         # Build LangGraph workflow
         if risk_workflow is None:
-            risk_workflow = build_risk_workflow(rag_system, ctx)
+            risk_workflow = build_risk_workflow(analysis_system, ctx)
+            ctx.logger.info("LangGraph risk workflow built!")
     else:
-        ctx.logger.warning("Risk Management Agent running in fallback mode (no RAG)")
+        ctx.logger.warning("Risk Management Agent running in fallback mode")
 
     # Initialize state storage
     ctx.storage.set("supplier_history", [])
@@ -118,13 +121,13 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
     ctx.storage.set("current_supplier", current_supplier_info)
 
     try:
-        # === USING LANGGRAPH WORKFLOW WITH RAG ===
+        # === USING LANGGRAPH WORKFLOW ===
 
         if risk_workflow is None:
-            ctx.logger.error("❌ Risk workflow not initialized!")
+            ctx.logger.error("Risk workflow not initialized!")
             raise RuntimeError("Risk workflow not ready")
 
-        ctx.logger.info("🔄 Starting LangGraph risk workflow...")
+        ctx.logger.info("Starting LangGraph risk workflow...")
         ctx.logger.info(f"Will scrape B Corp profile for risk analysis")
 
         # Create workflow state from request
@@ -159,7 +162,7 @@ async def handle_risk_request(ctx: Context, sender: str, msg: RiskRequest):
 
         result = risk_workflow.invoke(workflow_state)
 
-        ctx.logger.info("✅ LangGraph workflow completed")
+        ctx.logger.info("LangGraph workflow completed")
 
         # Extract results
         risk_score = result.get("risk_score", 70.0)
