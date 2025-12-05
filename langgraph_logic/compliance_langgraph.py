@@ -56,6 +56,7 @@ class ComplianceRAGSystem:
         Settings.embed_model = self.embed_model
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
 
+        print(f"Settings: {Settings}")
         print(f"Setting up Compliance RAG System: {Settings.llm}")
 
         self.documents = []
@@ -160,6 +161,7 @@ class ComplianceRAGSystem:
                         break
 
             ctx.logger.info(f"Successfully scraped data for {supplier_name}")
+            ctx.logger.info(f"Scraped data on line 164: {scraped_data}")
             return scraped_data
 
         except Exception as e:
@@ -380,6 +382,8 @@ class ComplianceRAGSystem:
                 )
                 b_corp_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/company/{supplier_slug}"
 
+            ctx.logger.info(f"B Corp URL on line 385: {b_corp_url}")
+
             ctx.logger.info(f"Step 1: Scraping B Corp data for {supplier_name}")
             scraped_data = await self.scrape_bcorp_supplier_page(
                 ctx, supplier_name, b_corp_url
@@ -410,6 +414,8 @@ class ComplianceRAGSystem:
             {scraped_data.get('customers', 'No data')}
             """
 
+            ctx.logger.info(f"Supplier text on line 417: {supplier_text}")
+
             # Create Document object
             doc = Document(
                 text=supplier_text,
@@ -425,6 +431,8 @@ class ComplianceRAGSystem:
 
             # Step 4: Query RAG system
             query = compliance_prompt(company_values, industry, supplier_name)
+
+            ctx.logger.info(f"Query on line 435: {query}")
 
             # Query using the indexed data
             rag_response = self.query_engine.query(query)
@@ -741,7 +749,9 @@ def compliance_check_node(
 
     try:
         supplier_name = state.get("supplier_name", "Unknown")
+        ctx.logger.info(f"Supplier name on line 752: {supplier_name}")
         b_corp_url = state.get("b_corp_profile_url")
+        ctx.logger.info(f"B Corp URL on line 754: {b_corp_url}")
 
         ctx.logger.info(f"Analyzing compliance for: {supplier_name}")
 
@@ -752,6 +762,8 @@ def compliance_check_node(
             industry=state.get("industry", ""),
             b_corp_url=b_corp_url,
         )
+
+        ctx.logger.info(f"RAG result on line 766: {rag_result}")
 
         # Update state with compliance results
         state["compliance_score"] = rag_result.get("compliance_score", 0.0)

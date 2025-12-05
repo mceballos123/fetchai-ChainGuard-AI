@@ -54,10 +54,13 @@ class RiskRAGSystem:
         # Configure Settings for LlamaIndex (embeddings only)
         Settings.embed_model = self.embed_model
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
+        print(f"Settings on line 57: {Settings}")
 
         print(f"Setting up Risk RAG System: {Settings.llm}")
         self.documents = []
         self.scraped_supplier_data = {}
+        print(f"Documents on line 59: {self.documents}")
+        print(f"Scraped supplier data on line 60: {self.scraped_supplier_data}")
 
     async def scrape_bcorp_supplier_page(
         self, ctx: Context, supplier_name: str, company_url: str
@@ -103,6 +106,7 @@ class RiskRAGSystem:
 
             # Extract Overall B Impact Score
             score_element = soup.find("div", class_=re.compile(".*score.*", re.I))
+            print(f"Score element on line 109: {score_element}")
             if score_element:
                 score_text = score_element.get_text(strip=True)
                 scraped_data["overall_score"] = score_text
@@ -259,6 +263,8 @@ class RiskRAGSystem:
             )
 
             nodes = []
+            print(f"Nodes on line 266: {nodes}")
+            print(f"Documents on line 267: {self.documents}")
             for doc in self.documents:
                 doc_nodes = parser.get_nodes_from_documents([doc])
                 nodes.extend(doc_nodes)
@@ -341,6 +347,7 @@ class RiskRAGSystem:
                     supplier_name.lower().replace(" ", "-").replace("_", "-")
                 )
                 b_corp_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/company/{supplier_slug}"
+            print(f"B Corp URL on line 350: {b_corp_url}")
 
             scraped_data = await self.scrape_bcorp_supplier_page(
                 ctx, supplier_name, b_corp_url
@@ -371,6 +378,8 @@ class RiskRAGSystem:
             {scraped_data.get('customers', 'No data')}
             """
 
+            print(f"Supplier text on line 381: {supplier_text}")
+
             # Create Document object
             doc = Document(
                 text=supplier_text,
@@ -380,6 +389,7 @@ class RiskRAGSystem:
                     "url": b_corp_url,
                 },
             )
+            print(f"Document on line 393: {doc}")
 
             # Step 3: Index the document in Pinecone
             await self._index_scraped_document(ctx, doc)
@@ -390,6 +400,8 @@ class RiskRAGSystem:
             # Query using the indexed data
             rag_response = self.query_engine.query(query)
             response_text = str(rag_response)
+
+            print(f"Response text on line 404: {response_text}")
 
             # Step 5: Parse response and extract risk data
             result = await self._parse_rag_response(ctx, response_text, supplier_name)

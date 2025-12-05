@@ -55,7 +55,9 @@ class FinancialRAGSystem:
         Settings.embed_model = self.embed_model
         Settings.llm = Ollama(model=self.llm_model, request_timeout=300)
 
+        print(f"Settings: {Settings}")
         print(f"Setting up Financial RAG System: {Settings.llm}")
+
         self.documents = []
         self.scraped_tariff_data = {}
 
@@ -70,6 +72,8 @@ class FinancialRAGSystem:
         Returns:
             Country name or None
         """
+        print(f"Text on line 75: {text}")
+        print(f"Known countries on line 76: {known_countries}")
         if not text:
             return None
 
@@ -214,6 +218,8 @@ class FinancialRAGSystem:
                     break
 
             # Fallback: Look for "Operates In" if headquarters didn't work
+            print(f"Scraped data on line 221: {scraped_data}")
+            print(f"All text on line 222: {all_text}")
             if not scraped_data["country"]:
                 operates_pattern = r"Operates In\|([^|]+)"
                 match = re.search(operates_pattern, all_text, re.IGNORECASE)
@@ -376,6 +382,9 @@ class FinancialRAGSystem:
             "retrieved_context": str
         }
         """
+        print(
+            f"Querying financial documents on line 385: {supplier_name}, {industry}, {b_corp_url}"
+        )
         if not self.initialized:
             ctx.logger.error("RAG system not initialized")
             return self._generate_fallback_response(supplier_name, "Unknown")
@@ -420,6 +429,8 @@ class FinancialRAGSystem:
             Risk Factors: {', '.join(country_analysis['risk_factors'])}
             """
 
+            print(f"Financial text on line 430: {financial_text}")
+
             # Create Document object
             doc = Document(
                 text=financial_text,
@@ -430,6 +441,8 @@ class FinancialRAGSystem:
                     "url": b_corp_url or "",
                 },
             )
+
+            print(f"Document on line 443: {doc}")
 
             # Step 4: Index the document in Pinecone
             await self._index_scraped_document(ctx, doc)
@@ -486,6 +499,8 @@ class FinancialRAGSystem:
             # Parse response
             lines = response_text.split("\n")
 
+            print(f"Lines on line 499: {lines}")
+
             for i, line in enumerate(lines):
                 line_lower = line.lower()
 
@@ -530,6 +545,11 @@ class FinancialRAGSystem:
                         and "none" not in factors_str
                     ):
                         risk_factors = [f.strip() for f in factors_str.split(",")]
+
+            print(f"Financial score on line 547: {financial_score}")
+            print(f"Financial details on line 548: {financial_details}")
+            print(f"Risk factors on line 549: {risk_factors}")
+            print(f"Retrieved context on line 550: {response_text}")
 
             return {
                 "financial_score": float(financial_score),
@@ -982,5 +1002,6 @@ def build_financial_workflow(
 
     # Compile workflow
     compiled_workflow = workflow.compile()
+    print(f"Compiled workflow on line 987: {compiled_workflow}")
 
     return compiled_workflow
