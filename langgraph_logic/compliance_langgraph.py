@@ -1,12 +1,12 @@
 """
-Compliance LangGraph Workflow - With Ollama LLM (No Pinecone/RAG)
+Compliance LangGraph Workflow - With Google Gemini LLM (No Pinecone/RAG)
 
 This module handles compliance analysis by:
 1. Scraping B Corp page for supplier ethics and sustainability data
-2. Using Ollama LLM to evaluate the scraped data with the compliance prompt
+2. Using Google Gemini LLM to evaluate the scraped data with the compliance prompt
 3. Returning compliance score and details
 
-Uses Ollama for LLM reasoning, but no vector stores or RAG systems.
+Uses Gemini for LLM reasoning, but no vector stores or RAG systems.
 """
 
 from typing import Dict, Any, List, Optional, Literal
@@ -21,50 +21,42 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-
+from selenium.webdriver.remote.webdriver import WebDriver as RemoteWebDriver
+from selenium.webdriver.common.by import By
 from dotenv import load_dotenv
 from uagents import Context
-from ollama import Client
-
+import google.generativeai as genai
+import json
 from langgraph.graph import StateGraph, START, END
 from prompts.compliance_prompt import compliance_prompt
 
-# Commented out - RAG/Pinecone not needed
-# from llama_index.core import VectorStoreIndex, Settings, Document
-# from llama_index.core.node_parser import SimpleNodeParser
-# from llama_index.vector_stores.pinecone import PineconeVectorStore
-# from llama_index.embeddings.ollama import OllamaEmbedding
-# from pinecone import Pinecone, ServerlessSpec
-# from llama_index.llms.ollama import Ollama
-
 load_dotenv()
 
-# Commented out - Pinecone not needed
-# PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-# EMBEDDING_DIMENSION = os.getenv("EMBEDDING_DIMENSION")
+# Configure Gemini
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 
 class ComplianceAnalysisSystem:
     """
-    Compliance analysis system - scrapes B Corp page and uses Ollama LLM for analysis.
+    Compliance analysis system - scrapes B Corp page and uses Google Gemini LLM for analysis.
 
-    Uses Ollama LLM for reasoning and detailed analysis generation.
+    Uses Gemini LLM for reasoning and detailed analysis generation.
     No Pinecone or RAG needed - uses scraped data directly with LLM.
     """
 
     def __init__(self):
         self.initialized = False
 
-        # Initialize Ollama Client for LLM reasoning
-        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=400)
-        self.llm_model = "llama3.2:1b"
-
-        # Commented out - RAG/Pinecone not needed
-        # self.index = None
-        # self.query_engine = None
-        # self.embed_model = OllamaEmbedding(model_name="nomic-embed-text")
-        # Settings.embed_model = self.embed_model
-        # Settings.llm = Ollama(model=self.llm_model, request_timeout=400)
+        # Initialize Gemini model with token limits to reduce API costs
+        self.gemini_model = genai.GenerativeModel(
+            "models/gemini-2.0-flash",  # Alternative: try models/gemini-2.5-pro if safety filters persist
+            generation_config={
+                "max_output_tokens": 1200,  # Limit response length
+                "temperature": 0.3,  # Lower temperature for more focused responses
+            },
+        )
 
         self.documents = []
         self.scraped_supplier_data = {}
@@ -97,15 +89,30 @@ class ComplianceAnalysisSystem:
                 "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
             )
 
-            driver = webdriver.Chrome(options=chrome_options)
-            driver.set_page_load_timeout(30)
+            # Use Remote Selenium if SELENIUM_REMOTE_URL is set (Docker), else local Chrome
+            selenium_url = os.getenv("SELENIUM_REMOTE_URL")
+            if selenium_url:
+                ctx.logger.info(f"Using remote Selenium at: {selenium_url}")
+                driver = webdriver.Remote(
+                    command_executor=selenium_url, options=chrome_options
+                )
+            else:
+                driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(60)
 
             # Use WebDriverWait for better timeout control
             wait = WebDriverWait(driver, 15)
 
             ctx.logger.info(f"Loading page: {company_url}")
             driver.get(company_url)
-            time.sleep(5)
+            ctx.logger.info(f"Page loaded, current URL: {driver.current_url}")
+            ctx.logger.info(f"Page title: {driver.title}")
+
+            # Wait longer for JavaScript to render
+            time.sleep(8)
+
+            # Log page source length to verify content loaded
+            ctx.logger.info(f"Page source length: {len(driver.page_source)} chars")
 
             scraped_data = {
                 "supplier_name": supplier_name,
@@ -132,8 +139,18 @@ class ComplianceAnalysisSystem:
             for tab in tabs:
                 try:
                     # Check if driver is still alive before continuing
-                    if not driver or driver.service.process is None:
-                        ctx.logger.warning(f"Driver died, stopping tab scraping")
+                    # For Remote WebDriver, we can't check service.process - use a simple check instead
+                    if not driver:
+                        ctx.logger.warning("Driver is None, stopping tab scraping")
+                        break
+
+                    # Verify driver is responsive (works for both local and remote)
+                    try:
+                        _ = driver.current_url
+                    except Exception:
+                        ctx.logger.warning(
+                            "Driver not responsive, stopping tab scraping"
+                        )
                         break
 
                     # Try to find and click the tab button with timeout
@@ -143,43 +160,59 @@ class ComplianceAnalysisSystem:
                         )
                     )
                     driver.execute_script("arguments[0].click();", tab_button)
-                    time.sleep(2)
+                    time.sleep(5)
 
                     # Get updated page content
-                    tab_soup = BeautifulSoup(driver.page_source, "html.parser")
+                    tab_content = ""
 
-                    # Extract tab content
-                    content_div = tab_soup.find("div", {"role": "tabpanel"})
-                    if content_div:
-                        tab_content = content_div.get_text(separator=" ", strip=True)
-                        scraped_data[tab.lower()] = tab_content[:2000]
+                    # Strategy 1: Get visible content directly from Selenium
+                    try:
+                        # Find visible tabpanel
+                        content_elements = driver.find_elements(
+                            By.XPATH, "//div[@role='tabpanel' and not(@hidden)]"
+                        )
+                        for elem in content_elements:
+                            if elem.is_displayed():
+                                text = elem.text.strip()
+                                if len(text) > len(tab_content):
+                                    tab_content = text
+                    except Exception as e:
+                        ctx.logger.debug(f"Strategy 1 failed: {e}")
+
+                    # Strategy 2: Get main content area if Strategy 1 failed
+                    if not tab_content or len(tab_content) < 100:
+                        try:
+                            main_elem = driver.find_element(By.XPATH, "//main")
+                            if main_elem:
+                                tab_content = main_elem.text.strip()
+                        except Exception as e:
+                            ctx.logger.debug(f"Strategy 2 failed: {e}")
+
+                    # Store content if we found any - OPTIMIZED: Reduced from 2000 to 500 chars to save tokens
+                    if tab_content and len(tab_content) > 50:
+                        scraped_data[tab.lower()] = tab_content[:500]
 
                 except Exception as e:
-                    ctx.logger.warning(f"Could not scrape {tab} tab: {e}")
-                    # Don't continue if driver is dead
+                    # Check if driver is still responsive before continuing
                     try:
-                        if driver and driver.service.process:
+                        if driver:
+                            _ = driver.current_url  # Quick responsiveness check
                             continue
                         else:
-                            ctx.logger.error("Driver is dead, stopping scraping")
                             break
-                    except:
-                        ctx.logger.error("Driver check failed, stopping scraping")
+                    except Exception:
                         break
 
-            ctx.logger.info(f"Successfully scraped data for {supplier_name}")
+            ctx.logger.info(f"Scraping complete for {supplier_name}")
             return scraped_data
 
         except Exception as e:
-            ctx.logger.error(f"Error scraping B Corp page: {e}")
-            import traceback
-
-            traceback.print_exc()
+            ctx.logger.error(f"Scraping failed for {supplier_name}: {str(e)}")
 
             return {
                 "supplier_name": supplier_name,
                 "url": company_url,
-                "error": str(e),
+                "error": f"{type(e).__name__}: {str(e)}",
             }
 
         finally:
@@ -192,34 +225,15 @@ class ComplianceAnalysisSystem:
                     ctx.logger.warning(f"Error closing driver: {e}")
 
     async def initialize(self, ctx: Context) -> bool:
-        """Initialize the compliance analysis system with Ollama LLM"""
+        """Initialize the compliance analysis system with Google Gemini LLM"""
         try:
-            # Test Ollama connection
-            try:
-                test_response = self.ollama_client.chat(
-                    model=self.llm_model,
-                    messages=[{"role": "user", "content": "Hello"}],
-                )
-                ctx.logger.info(f"Ollama LLM connected: {self.llm_model}")
-            except Exception as e:
-                ctx.logger.warning(f"Ollama connection test failed: {e}")
-                ctx.logger.info("Will use fallback analysis without LLM")
-
-            # Commented out - Pinecone not needed
-            # if not await self._setup_pinecone(ctx):
-            #     return False
-
-            ctx.logger.info(
-                "Compliance Analysis System initialized (with Ollama LLM, no Pinecone)"
-            )
+            # Skip test call to save tokens
+            ctx.logger.info("Compliance Analysis System initialized")
             self.initialized = True
             return True
 
         except Exception as e:
             ctx.logger.error(f"Failed to initialize: {e}")
-            import traceback
-
-            traceback.print_exc()
             return False
 
     # Commented out - Pinecone not needed
@@ -246,7 +260,7 @@ class ComplianceAnalysisSystem:
         supplier_name: str,
     ) -> str:
         """
-        Query Ollama LLM for detailed compliance analysis.
+        Query Google Gemini LLM for detailed compliance analysis.
 
         Args:
             ctx: Context for logging
@@ -257,26 +271,44 @@ class ComplianceAnalysisSystem:
             LLM-generated analysis text
         """
         try:
-            ctx.logger.info(f"Querying Ollama LLM for compliance analysis...")
+            # Build the full prompt with system context - OPTIMIZED: Shorter system prompt
+            full_prompt = f"""You are a compliance analyst. Analyze the supplier data and provide scores.
 
-            response = self.ollama_client.chat(
-                model=self.llm_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a compliance analyst specializing in ethics, sustainability, and corporate responsibility. Analyze the provided data and provide structured scores and summaries.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-            )
+IMPORTANT: Return your analysis in this exact JSON format:
+{{
+    "ETHICS_SCORE": <number 0-100>,
+    "SUSTAINABILITY_SCORE": <number 0-100>,
+    "COMBINED_SCORE": <number 0-100>,
+    "ETHICS_INFO": "<brief summary>",
+    "SUSTAINABILITY_INFO": "<brief summary>",
+    "VIOLATIONS": []
+}}
 
-            llm_response = response["message"]["content"]
-            ctx.logger.info(f"LLM analysis received ({len(llm_response)} chars)")
+{prompt}"""
+
+            response = self.gemini_model.generate_content(full_prompt)
+
+            # Check if response was blocked by safety filters
+            if not response.candidates:
+                return f"ETHICS_SCORE: 50\nSUSTAINABILITY_SCORE: 50\nCOMBINED_SCORE: 50\nETHICS_INFO: Analysis blocked by safety filters\nSUSTAINABILITY_INFO: Analysis blocked by safety filters\nVIOLATIONS: None"
+
+            # Check finish reason
+            finish_reason = response.candidates[0].finish_reason
+            if finish_reason == 2:  # SAFETY block
+                return f"ETHICS_SCORE: 50\nSUSTAINABILITY_SCORE: 50\nCOMBINED_SCORE: 50\nETHICS_INFO: Response blocked by safety filters\nSUSTAINABILITY_INFO: Response blocked by safety filters\nVIOLATIONS: None"
+            elif finish_reason == 3:  # RECITATION
+                return f"ETHICS_SCORE: 50\nSUSTAINABILITY_SCORE: 50\nCOMBINED_SCORE: 50\nETHICS_INFO: Response blocked due to recitation\nSUSTAINABILITY_INFO: Response blocked due to recitation\nVIOLATIONS: None"
+
+            # Try to get the response text
+            try:
+                llm_response = response.text
+            except Exception:
+                return f"ETHICS_SCORE: 50\nSUSTAINABILITY_SCORE: 50\nCOMBINED_SCORE: 50\nETHICS_INFO: Error extracting response\nSUSTAINABILITY_INFO: Error extracting response\nVIOLATIONS: None"
+
             return llm_response
 
         except Exception as e:
-            ctx.logger.warning(f"LLM query failed: {e}")
-            return f"Unable to analyze compliance for {supplier_name}. Error: {str(e)}"
+            return f"ETHICS_SCORE: 50\nSUSTAINABILITY_SCORE: 50\nCOMBINED_SCORE: 50\nETHICS_INFO: LLM query failed\nSUSTAINABILITY_INFO: LLM query failed\nVIOLATIONS: None"
 
     async def query_compliance_documents(
         self,
@@ -287,12 +319,12 @@ class ComplianceAnalysisSystem:
         b_corp_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Analyze supplier compliance by scraping B Corp page and using Ollama LLM.
+        Analyze supplier compliance by scraping B Corp page and using Gemini LLM.
 
         SIMPLIFIED FLOW (No RAG/Pinecone):
         1. Scrape B Corp page for supplier data
         2. Format scraped data as text
-        3. Send to Ollama LLM with compliance prompt
+        3. Send to Gemini LLM with compliance prompt
         4. Parse LLM response and extract scores
 
         Returns:
@@ -317,19 +349,14 @@ class ComplianceAnalysisSystem:
                 )
                 b_corp_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/company/{supplier_slug}"
 
-            ctx.logger.info(f"B Corp URL: {b_corp_url}")
-
-            # ================================================================
-            # STEP 1: SCRAPE B CORP PAGE
-            # ================================================================
-            ctx.logger.info(f"Scraping B Corp data for {supplier_name}...")
+            # Scrape B Corp page
 
             scraped_data = await self.scrape_bcorp_supplier_page(
                 ctx, supplier_name, b_corp_url
             )
 
             if "error" in scraped_data:
-                ctx.logger.warning("Scraping failed, using fallback")
+                ctx.logger.error(f"Scraping failed for {supplier_name}")
                 return self._generate_fallback_response(supplier_name)
 
             # ================================================================
@@ -355,21 +382,13 @@ class ComplianceAnalysisSystem:
             {scraped_data.get('customers', 'No data')}
             """
 
-            ctx.logger.info(f"Formatted supplier data for LLM analysis")
-
-            # ================================================================
-            # STEP 3: QUERY OLLAMA LLM WITH COMPLIANCE PROMPT
-            # ================================================================
+            # Query Gemini LLM
             query = compliance_prompt(company_values, industry, supplier_text)
-            ctx.logger.info(f"Querying Ollama for compliance analysis...")
-
-            # Query Ollama LLM directly (no RAG)
             llm_response = self._query_llm_for_analysis(ctx, query, supplier_name)
 
-            # ================================================================
-            # STEP 4: PARSE RESPONSE
-            # ================================================================
+            # Parse response
             result = await self._parse_llm_response(ctx, llm_response, supplier_name)
+            ctx.logger.info(f"Compliance score: {result.get('compliance_score')}/100")
             result["selected_supplier"] = supplier_name
             result["scraped_data"] = scraped_data
 
@@ -377,9 +396,6 @@ class ComplianceAnalysisSystem:
 
         except Exception as e:
             ctx.logger.error(f"Query failed: {e}")
-            import traceback
-
-            traceback.print_exc()
             return self._generate_fallback_response(supplier_name)
 
     async def _parse_llm_response(
@@ -395,30 +411,91 @@ class ComplianceAnalysisSystem:
             sustainability_info = "Insufficient data"
             violations = []
 
-            # Parse response (handle various formats)
+            # Try parsing as JSON first (Gemini sometimes returns JSON format)
+            try:
+                # Extract JSON from markdown code blocks if present
+                json_text = response_text.strip()
+
+                # Remove markdown code blocks
+                if "```json" in json_text:
+                    json_start = json_text.find("```json") + 7
+                    json_end = json_text.find("```", json_start)
+                    if json_end != -1:
+                        json_text = json_text[json_start:json_end].strip()
+                elif "```" in json_text:
+                    json_start = json_text.find("```") + 3
+                    json_end = json_text.find("```", json_start)
+                    if json_end != -1:
+                        json_text = json_text[json_start:json_end].strip()
+
+                # Parse JSON
+                data = json.loads(json_text)
+
+                # Extract values from JSON
+                ethics_score = float(data.get("ETHICS_SCORE", 50))
+                sustainability_score = float(data.get("SUSTAINABILITY_SCORE", 50))
+                combined_score = float(
+                    data.get(
+                        "COMBINED_SCORE", (ethics_score + sustainability_score) / 2
+                    )
+                )
+                ethics_info = data.get("ETHICS_INFO", "Insufficient data")
+                sustainability_info = data.get(
+                    "SUSTAINABILITY_INFO", "Insufficient data"
+                )
+
+                # Handle violations
+                violations_data = data.get("VIOLATIONS", [])
+                if isinstance(violations_data, list):
+                    violations = violations_data
+                elif isinstance(violations_data, str):
+                    violations = [violations_data] if violations_data else []
+
+                return {
+                    "compliance_score": float(combined_score),
+                    "ethics_info": ethics_info or "No ethics information available",
+                    "sustainability_info": sustainability_info
+                    or "No sustainability information available",
+                    "violations": violations,
+                    "retrieved_context": response_text,
+                }
+
+            except (json.JSONDecodeError, ValueError, KeyError):
+                pass
+
+            # Fallback: Parse response as plain text
             lines = response_text.split("\n")
 
             for i, line in enumerate(lines):
-                line_lower = line.lower()
+                line_lower = line.lower().strip()
 
-                if "ethics_score:" in line_lower:
+                if "ethics_score:" in line_lower or "ethics score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
-                        ethics_score = max(0, min(100, float(score_str)))
+                        # Remove any non-numeric characters except decimal point
+                        score_str = ''.join(c for c in score_str if c.isdigit() or c == '.')
+                        if score_str:
+                            ethics_score = max(0, min(100, float(score_str)))
                     except (ValueError, IndexError):
                         pass
 
-                elif "sustainability_score:" in line_lower:
+                elif "sustainability_score:" in line_lower or "sustainability score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
-                        sustainability_score = max(0, min(100, float(score_str)))
+                        # Remove any non-numeric characters except decimal point
+                        score_str = ''.join(c for c in score_str if c.isdigit() or c == '.')
+                        if score_str:
+                            sustainability_score = max(0, min(100, float(score_str)))
                     except (ValueError, IndexError):
                         pass
 
-                elif "combined_score:" in line_lower:
+                elif "combined_score:" in line_lower or "combined score:" in line_lower:
                     try:
                         score_str = line.split(":")[-1].strip().split()[0]
-                        combined_score = max(0, min(100, float(score_str)))
+                        # Remove any non-numeric characters except decimal point
+                        score_str = ''.join(c for c in score_str if c.isdigit() or c == '.')
+                        if score_str:
+                            combined_score = max(0, min(100, float(score_str)))
                     except (ValueError, IndexError):
                         pass
 
@@ -486,9 +563,6 @@ class ComplianceAnalysisSystem:
 
         except Exception as e:
             ctx.logger.error(f"Error parsing LLM response: {e}")
-            import traceback
-
-            traceback.print_exc()
             return self._generate_fallback_response(supplier_name)
 
     def _generate_fallback_response(self, supplier_name: str) -> Dict[str, Any]:
@@ -518,25 +592,13 @@ def compliance_check_node(
     ctx: Context,
 ) -> SupplierWorkflowState:
     """
-    Node 1: Run compliance check on supplier using Ollama LLM.
-
-    Process:
-    1. Scrape B Corp webpage for supplier
-    2. Send scraped data to Ollama with compliance prompt
-    3. Parse response and extract compliance score
-    4. Return compliance score and details
+    Node 1: Run compliance check on supplier using Gemini LLM.
     """
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("[LangGraph Node: compliance_check] SCRAPING & ANALYZING")
-    ctx.logger.info("=" * 70)
-
     try:
         supplier_name = state.get("supplier_name", "Unknown")
         b_corp_url = state.get("b_corp_profile_url")
         company_values = state.get("company_values", "")
         industry = state.get("industry", "")
-
-        ctx.logger.info(f"Analyzing compliance for: {supplier_name}")
 
         # Run analysis synchronously
         import asyncio
@@ -562,7 +624,8 @@ def compliance_check_node(
             loop = asyncio.get_running_loop()
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(run_async)
-                result = future.result(timeout=300)
+                # Reduced timeout to 180 seconds (3 min) - scraping + LLM should complete within this
+                result = future.result(timeout=180)
         except RuntimeError:
             result = asyncio.run(
                 analysis_system.query_compliance_documents(
@@ -595,6 +658,11 @@ def compliance_check_node(
         state["current_step"] = "compliance_check_failed"
         state["error_message"] = f"Compliance check failed: {str(e)}"
         state["compliance_score"] = 0.0
+        state["violations"] = [
+            f"Analysis failed: {str(e)}"
+        ]  # Set violations to prevent NoneType error
+        state["ethics_info"] = "Analysis could not be completed due to an error"
+        state["sustainability_info"] = "Analysis could not be completed due to an error"
         return state
 
 
@@ -627,38 +695,15 @@ def compliance_router(
 
 def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
     """Node 3a: Success path - Supplier meets compliance requirements."""
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("SUCCESS NODE - COMPLIANCE APPROVED")
-    ctx.logger.info("=" * 70)
-
     state["current_step"] = "compliance_approved"
     state["should_continue"] = False
-
-    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
-    ctx.logger.info(f"Score: {state['compliance_score']}/100")
-    ctx.logger.info(f"Status: APPROVED")
-    ctx.logger.info("=" * 70)
-
     return state
 
 
 def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowState:
     """Node 3b: Error path - Supplier does not meet requirements."""
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("ERROR NODE - COMPLIANCE REJECTED")
-    ctx.logger.info("=" * 70)
-
-    compliance_score = state.get("compliance_score", 0.0)
-    error_msg = state.get("error_message", "Unknown error")
-
-    ctx.logger.info(f"Supplier: {state.get('supplier_name', 'Unknown')}")
-    ctx.logger.info(f"Score: {compliance_score}/100")
-    ctx.logger.info(f"Error: {error_msg}")
-    ctx.logger.info("=" * 70)
-
     state["current_step"] = "compliance_rejected"
     state["should_continue"] = False
-
     return state
 
 
@@ -670,23 +715,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
 def build_compliance_workflow(
     analysis_system: ComplianceAnalysisSystem, ctx: Context
 ) -> StateGraph:
-    """
-    Build the LangGraph compliance workflow.
-
-    Flow:
-    START
-        |
-    compliance_check_node (Scrape B Corp + Analyze with Ollama)
-        |
-    compliance_router (Check score >= 60)
-        |--- success_node (Score >= 60) --> END
-        |--- error_node (Score < 60 or error) --> END
-
-    Returns:
-        Compiled StateGraph workflow
-    """
-    ctx.logger.info("Building Compliance LangGraph Workflow...")
-
+    """Build the LangGraph compliance workflow"""
     # Create state graph
     workflow = StateGraph(SupplierWorkflowState)
 
@@ -712,10 +741,4 @@ def build_compliance_workflow(
     workflow.add_edge("error_node", END)
 
     # Compile workflow
-    compiled_workflow = workflow.compile()
-
-    ctx.logger.info(
-        "Compliance workflow built successfully (with Ollama LLM, no Pinecone)"
-    )
-
-    return compiled_workflow
+    return workflow.compile()

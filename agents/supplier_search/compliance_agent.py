@@ -22,14 +22,13 @@ from test_func.compliance_helpers import (
     validate_response_before_sending,
 )
 
-# /Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/compliance_agent.py
 load_dotenv()
 
 compliance_agent = Agent(
     name="compliance_agent",
     seed=os.getenv("COMPLIANCE_AGENT_SEED"),
     port=8001,
-    mailbox=True,
+    mailbox=True,  # Internal agent - no mailbox needed for local communication
 )
 
 compliance_protocol = Protocol(name="compliance_protocol", version="1.0")
@@ -41,10 +40,9 @@ compliance_workflow = None
 @compliance_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent, analysis system, and LangGraph workflow on startup"""
-    ctx.logger.info("Compliance Agent starting up...")
-    ctx.logger.info(f"Agent address: {compliance_agent.address}")
+    ctx.logger.info("Compliance Agent starting up")
 
-    # Initialize analysis system (uses Ollama LLM, no RAG/Pinecone)
+    # Initialize analysis system (uses Gemini LLM, no RAG/Pinecone)
     global analysis_system, compliance_workflow
     if analysis_system is None:
         analysis_system = ComplianceAnalysisSystem()
@@ -52,33 +50,18 @@ async def startup(ctx: Context):
     success = await analysis_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("Compliance Agent ready with Ollama LLM!")
-
+        ctx.logger.info("Compliance Agent initialized")
         # Build LangGraph workflow
         if compliance_workflow is None:
             compliance_workflow = build_compliance_workflow(analysis_system, ctx)
-            ctx.logger.info("LangGraph compliance workflow built!")
     else:
-        ctx.logger.warning("Compliance Agent running in fallback mode")
+        ctx.logger.warning("Compliance Agent initialization failed")
 
-    # Initialize state storage for supplier information
+    # Initialize state storage
     ctx.storage.set("supplier_history", [])
     ctx.storage.set("current_supplier", None)
     ctx.storage.set("previous_supplier", None)
-
-    # Track processed request IDs to prevent duplicates
-    ctx.storage.set("processed_request_ids", [])
-
-    # Initialize request trace for debugging
-    ctx.storage.set(
-        "request_trace",
-        {
-            "received_requests": [],
-            "sent_responses": [],
-        },
-    )
-
-    ctx.logger.info("Listening for ComplianceRequest messages...")
+    ctx.storage.set("request_trace", {"received_requests": [], "sent_responses": []})
 
     # Verify connection on startup
     conn_status = verify_compliance_connection(ctx)
@@ -89,12 +72,7 @@ async def startup(ctx: Context):
 @compliance_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info("Compliance Agent shutting down...")
-
-    # Log final state before shutdown
-    supplier_history = ctx.storage.get("supplier_history") or []
-    ctx.logger.info(f"Total suppliers processed: {len(supplier_history)}")
-    ctx.logger.info("Workflow cleanup complete")
+    ctx.logger.info("Compliance Agent shutting down")
 
 
 def get_supplier_state(ctx: Context) -> Dict[str, Any]:
@@ -111,34 +89,25 @@ def get_supplier_state(ctx: Context) -> Dict[str, Any]:
     }
 
 
-# process the complaicne requence from the supplier search agent
+# process the compliance request from the supplier search agent
 @compliance_protocol.on_message(model=ComplianceRequest, replies=ComplianceResponse)
 async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRequest):
     """
     Handle compliance check request from Orchestrator Agent.
 
     Process:
-    1. Receive supplier info and company values
-    2. Store previous state and update current state
-    3. Create workflow state from request
-    4. Run LangGraph compliance workflow:
-       - compliance_check_node: RAG analysis
-       - compliance_router: conditional routing (score >= 75?)
+    1. Check for duplicate request (deduplication)
+    2. Receive supplier info and company values
+    3. Store previous state and update current state
+    4. Create workflow state from request
+    5. Run LangGraph compliance workflow:
+       - compliance_check_node: LLM analysis
+       - compliance_router: conditional routing (score >= 60?)
        - success_node or error_node: prepare response
-    5. Build ComplianceResponse from workflow result
-    6. Return response to orchestrator
+    6. Build ComplianceResponse from workflow result
+    7. Return response to orchestrator
     """
-    ctx.logger.info("")
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("📥 COMPLIANCE AGENT: RECEIVED REQUEST")
-    ctx.logger.info("=" * 70)
-    ctx.logger.info(f"From: {sender}")
-    ctx.logger.info(f"Request ID: {msg.request_id}")
-    ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
-    ctx.logger.info(f"Industry: {msg.industry}")
-    ctx.logger.info(f"Company Values: {msg.company_values[:50]}...")
-    ctx.logger.info(f"B Corp Profile URL: {msg.b_corp_profile_url}")
-    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"Received compliance request for {msg.supplier_name}")
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -163,10 +132,8 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         # === USING LANGGRAPH WORKFLOW ===
 
         if compliance_workflow is None:
-            ctx.logger.error("Compliance workflow not initialized!")
+            ctx.logger.error("Compliance workflow not initialized")
             raise RuntimeError("Compliance workflow not ready")
-
-        ctx.logger.info("Starting LangGraph compliance workflow...")
 
         # Create workflow state from request
         workflow_state = SupplierWorkflowState(
@@ -202,20 +169,13 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
 
         result = compliance_workflow.invoke(workflow_state)
 
-        ctx.logger.info("LangGraph workflow completed")
-
-        # Extract results
+        # Extract results with defensive defaults
         compliance_score = result.get("compliance_score", 70.0)
         ethics_info = result.get("ethics_info", "Analysis complete")
         sustainability_info = result.get("sustainability_info", "Analysis complete")
-        violations = result.get("violations", [])
+        violations = result.get("violations") or []
 
-        ctx.logger.info(f"Compliance Analysis Results:")
-        ctx.logger.info(f"  - Score: {compliance_score}/100")
-        ctx.logger.info(f"  - Violations: {len(violations)}")
-        ctx.logger.info(
-            f"  - Status: {'APPROVED' if compliance_score >= 75 else 'REJECTED'}"
-        )
+        ctx.logger.info(f"Compliance score: {compliance_score}/100")
 
         # Build response
         response = ComplianceResponse(
@@ -262,15 +222,6 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         )
 
         # Send response back to sender (Orchestrator Agent)
-        ctx.logger.info("")
-        ctx.logger.info("=" * 70)
-        ctx.logger.info("📤 COMPLIANCE AGENT: SENDING RESPONSE")
-        ctx.logger.info("=" * 70)
-        ctx.logger.info(f"To: {sender}")
-        ctx.logger.info(f"Request ID: {msg.request_id}")
-        ctx.logger.info(f"Compliance Score: {response.compliance_score}/100")
-        ctx.logger.info("=" * 70)
-
         await ctx.send(sender, response)
 
     except Exception as e:
@@ -293,7 +244,6 @@ async def handle_compliance_request(ctx: Context, sender: str, msg: ComplianceRe
         await ctx.send(sender, error_response)
 
 
-# /Users/mceballos456/fetchai-ChainGuard-AI/backend/agents/supplier_search/compliance_agent.py
 compliance_agent.include(compliance_protocol, publish_manifest=True)
 
 if __name__ == "__main__":

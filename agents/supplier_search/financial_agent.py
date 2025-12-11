@@ -40,8 +40,7 @@ financial_workflow = None
 @financial_agent.on_event("startup")
 async def startup(ctx: Context):
     """Initialize agent and LangGraph workflow on startup"""
-    ctx.logger.info("Financial Agent starting up...")
-    ctx.logger.info(f"Agent address: {financial_agent.address}")
+    ctx.logger.info("Financial Agent starting up")
 
     # Initialize Financial Analysis system (no RAG/Pinecone needed)
     global analysis_system, financial_workflow
@@ -51,33 +50,19 @@ async def startup(ctx: Context):
     success = await analysis_system.initialize(ctx)
 
     if success:
-        ctx.logger.info("Financial Agent ready! (No RAG - simplified analysis)")
-
+        ctx.logger.info("Financial Agent initialized")
         # Build LangGraph workflow
         if financial_workflow is None:
             financial_workflow = build_financial_workflow(analysis_system, ctx)
-            ctx.logger.info("LangGraph financial workflow built!")
     else:
         ctx.logger.warning("Financial Agent initialization failed")
 
-    # Initialize state storage for supplier information
+    # Initialize state storage
     ctx.storage.set("supplier_history", [])
     ctx.storage.set("current_supplier", None)
     ctx.storage.set("previous_supplier", None)
-
-    # Track processed request IDs to prevent duplicates
     ctx.storage.set("processed_request_ids", [])
-
-    # Initialize request trace for debugging
-    ctx.storage.set(
-        "request_trace",
-        {
-            "received_requests": [],
-            "sent_responses": [],
-        },
-    )
-
-    ctx.logger.info("Listening for FinancialRequest messages...")
+    ctx.storage.set("request_trace", {"received_requests": [], "sent_responses": []})
 
     # Verify connection on startup
     conn_status = verify_compliance_connection(ctx)
@@ -88,12 +73,7 @@ async def startup(ctx: Context):
 @financial_agent.on_event("shutdown")
 async def shutdown(ctx: Context):
     """Clean up on shutdown"""
-    ctx.logger.info("Financial Agent shutting down...")
-
-    # Log final state before shutdown
-    supplier_history = ctx.storage.get("supplier_history") or []
-    ctx.logger.info(f"Total suppliers processed: {len(supplier_history)}")
-    ctx.logger.info("Workflow and RAG system cleanup complete")
+    ctx.logger.info("Financial Agent shutting down")
 
 
 def get_supplier_state(ctx: Context) -> Dict[str, Any]:
@@ -130,17 +110,7 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
     Note: Supports any user country (e.g., "I'm in Germany and want a coffee supplier")
     """
-    ctx.logger.info("")
-    ctx.logger.info("=" * 70)
-    ctx.logger.info("📥 FINANCIAL AGENT: RECEIVED REQUEST")
-    ctx.logger.info("=" * 70)
-    ctx.logger.info(f"From: {sender}")
-    ctx.logger.info(f"Request ID: {msg.request_id}")
-    ctx.logger.info(f"Supplier Name: {msg.supplier_name}")
-    ctx.logger.info(f"B Corp URL: {msg.b_corp_profile_url}")
-    ctx.logger.info(f"Industry: {msg.industry}")
-    ctx.logger.info(f"User Country: {msg.user_country}")
-    ctx.logger.info("=" * 70)
+    ctx.logger.info(f"Received financial request for {msg.supplier_name}")
 
     # Log request reception
     log_request_reception(ctx, msg.request_id, msg.supplier_name, sender)
@@ -163,15 +133,10 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
     ctx.storage.set("current_supplier", current_supplier_info)
 
     try:
-        # === USING LANGGRAPH WORKFLOW WITH RAG ===
 
         if financial_workflow is None:
-            ctx.logger.error("❌ Financial workflow not initialized!")
+            ctx.logger.error("Financial workflow not initialized")
             raise RuntimeError("Financial workflow not ready")
-
-        ctx.logger.info("🔄 Starting LangGraph financial workflow...")
-        ctx.logger.info(f"User Country: {msg.user_country}")
-        ctx.logger.info(f"Will scrape B Corp page to extract supplier country")
 
         # Create workflow state from request
         workflow_state = SupplierWorkflowState(
@@ -206,23 +171,14 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
 
         result = financial_workflow.invoke(workflow_state)
 
-        ctx.logger.info("✅ LangGraph workflow completed")
-
-        # Extract results
+        # Extract results with defensive defaults
         financial_score = result.get("financial_score", 70.0)
         financial_details = result.get("financial_info", "Analysis complete")
-        risk_factors = result.get("risk_factors", [])
+        risk_factors = result.get("risk_factors") or []
         supplier_country = result.get("supplier_country", "Unknown")
         user_country = result.get("user_country", msg.user_country)
 
-        ctx.logger.info(f"Financial Analysis Results:")
-        ctx.logger.info(f"  - User Country: {user_country}")
-        ctx.logger.info(f"  - Supplier Country: {supplier_country}")
-        ctx.logger.info(f"  - Score: {financial_score}/100")
-        ctx.logger.info(f"  - Risk Factors: {len(risk_factors)}")
-        ctx.logger.info(
-            f"  - Status: {'APPROVED' if financial_score >= 60 else 'REJECTED'}"
-        )
+        ctx.logger.info(f"Financial score: {financial_score}/100")
 
         # Build response
         response = FinancialResponse(
@@ -268,15 +224,6 @@ async def handle_financial_request(ctx: Context, sender: str, msg: FinancialRequ
         )
 
         # Send response back to sender (Orchestrator Agent)
-        ctx.logger.info("")
-        ctx.logger.info("=" * 70)
-        ctx.logger.info("📤 FINANCIAL AGENT: SENDING RESPONSE")
-        ctx.logger.info("=" * 70)
-        ctx.logger.info(f"To: {sender}")
-        ctx.logger.info(f"Request ID: {msg.request_id}")
-        ctx.logger.info(f"Financial Score: {response.financial_score}/100")
-        ctx.logger.info("=" * 70)
-
         await ctx.send(sender, response)
 
     except Exception as e:

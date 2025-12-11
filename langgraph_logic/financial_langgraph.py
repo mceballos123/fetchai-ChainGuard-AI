@@ -1,13 +1,13 @@
 """
-Financial LangGraph Workflow - With Ollama LLM Reasoning (No Pinecone/RAG)
+Financial LangGraph Workflow - With Google Gemini LLM Reasoning (No Pinecone/RAG)
 
 This module handles financial risk analysis by:
 1. Extracting supplier country from B Corp Headquarters section
 2. Analyzing trade relationship between user's country and supplier's country
-3. Using Ollama LLM for reasoning and generating detailed financial analysis
+3. Using Google Gemini LLM for reasoning and generating detailed financial analysis
 4. Returning financial score and risk factors
 
-Uses Ollama for LLM reasoning, but no vector stores or RAG systems.
+Uses Gemini for LLM reasoning, but no vector stores or RAG systems.
 """
 
 from typing import Dict, Any, List, Optional, Literal
@@ -19,30 +19,41 @@ import time
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.remote.webdriver import WebDriver as RemoteWebDriver
 
 from dotenv import load_dotenv
 from uagents import Context
 from langgraph.graph import StateGraph, START, END
 from prompts.finance_prompt import finance_prompt
-from ollama import Client
+import google.generativeai as genai
 
 load_dotenv()
+
+# Configure Gemini
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 
 class FinancialAnalysisSystem:
     """
     Financial analysis system - extracts country from B Corp page and analyzes trade relationships.
 
-    Uses Ollama LLM for reasoning and detailed analysis generation.
+    Uses Google Gemini LLM for reasoning and detailed analysis generation.
     No Pinecone or RAG needed - uses rule-based country analysis with LLM-generated details.
     """
 
     def __init__(self):
         self.initialized = False
 
-        # Initialize Ollama Client for LLM reasoning
-        self.ollama_client = Client(host="http://127.0.0.1:11434", timeout=300)
-        self.llm_model = "llama3.2:1b"
+        # Initialize Gemini model with token optimization
+        self.gemini_model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            generation_config={
+                "max_output_tokens": 1400,
+                "temperature": 0.3,
+            },
+        )
 
     def _extract_country_from_text(self, text: str, ctx: Context) -> Optional[str]:
         """
@@ -131,12 +142,9 @@ class FinancialAnalysisSystem:
         for country in known_countries:
             if country.lower() in text_lower:
                 if country == "USA":
-                    ctx.logger.info(f"✅ Found country: United States")
                     return "United States"
                 if country == "UK":
-                    ctx.logger.info(f"✅ Found country: United Kingdom")
                     return "United Kingdom"
-                ctx.logger.info(f"✅ Found country: {country}")
                 return country
 
         # PRIORITY 2: Extract from comma-separated location
@@ -144,9 +152,6 @@ class FinancialAnalysisSystem:
         if len(parts) > 1:
             potential_country = parts[-1].strip()
             if len(potential_country) > 2 and potential_country[0].isupper():
-                ctx.logger.info(
-                    f"✅ Extracted country from comma split: {potential_country}"
-                )
                 return potential_country
 
         # PRIORITY 3: Try pipe-separated
@@ -156,12 +161,8 @@ class FinancialAnalysisSystem:
                 part_clean = part.strip()
                 for country in known_countries:
                     if country.lower() == part_clean.lower():
-                        ctx.logger.info(
-                            f"✅ Extracted country from pipe split: {country}"
-                        )
                         return country
 
-        ctx.logger.warning(f"⚠️ Could not extract country from: {text}")
         return None
 
     async def scrape_bcorp_country(
@@ -192,8 +193,16 @@ class FinancialAnalysisSystem:
                 "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
             )
 
-            driver = webdriver.Chrome(options=chrome_options)
-            driver.set_page_load_timeout(30)
+            # Use Remote Selenium if SELENIUM_REMOTE_URL is set (Docker), else local Chrome
+            selenium_url = os.getenv("SELENIUM_REMOTE_URL")
+            if selenium_url:
+                ctx.logger.info(f"Using remote Selenium at: {selenium_url}")
+                driver = webdriver.Remote(
+                    command_executor=selenium_url, options=chrome_options
+                )
+            else:
+                driver = webdriver.Chrome(options=chrome_options)
+            driver.set_page_load_timeout(60)
 
             ctx.logger.info(f"Loading B Corp page: {b_corp_url}")
             driver.get(b_corp_url)
@@ -225,9 +234,6 @@ class FinancialAnalysisSystem:
                             location_text, ctx
                         )
                         if scraped_data["country"]:
-                            ctx.logger.info(
-                                f"✅ Country extracted: {scraped_data['country']}"
-                            )
                             headquarters_found = True
                             break
 
@@ -255,11 +261,8 @@ class FinancialAnalysisSystem:
                             headquarters_text, ctx
                         )
                         if scraped_data["country"]:
-                            ctx.logger.info(
-                                f"✅ Country extracted: {scraped_data['country']}"
-                            )
                             headquarters_found = True
-                            break
+                        break
 
             # Fallback: Look for "Operates In" if headquarters didn't work
             if not scraped_data["country"]:
@@ -272,25 +275,16 @@ class FinancialAnalysisSystem:
                         operates_text, ctx
                     )
                     if scraped_data["country"]:
-                        ctx.logger.info(
-                            f"✅ Country from 'Operates In': {scraped_data['country']}"
-                        )
+                        pass
 
             # Default if no country found
             if not scraped_data["country"]:
                 scraped_data["country"] = "Unknown"
-                ctx.logger.warning(
-                    "⚠️ Could not determine country - defaulting to Unknown"
-                )
 
-            ctx.logger.info(f"Country extraction complete: {scraped_data['country']}")
             return scraped_data
 
         except Exception as e:
             ctx.logger.error(f"Error scraping B Corp page: {e}")
-            import traceback
-
-            traceback.print_exc()
             return {
                 "supplier_name": supplier_name,
                 "country": "Unknown",
@@ -307,22 +301,10 @@ class FinancialAnalysisSystem:
                     ctx.logger.warning(f"Error closing driver: {e}")
 
     async def initialize(self, ctx: Context) -> bool:
-        """Initialize the financial analysis system with Ollama LLM"""
+        """Initialize the financial analysis system with Google Gemini LLM"""
         try:
-            # Test Ollama connection
-            try:
-                test_response = self.ollama_client.chat(
-                    model=self.llm_model,
-                    messages=[{"role": "user", "content": "Hello"}],
-                )
-                ctx.logger.info(f"✅ Ollama LLM connected: {self.llm_model}")
-            except Exception as e:
-                ctx.logger.warning(f"⚠️ Ollama connection test failed: {e}")
-                ctx.logger.info("Will use fallback analysis without LLM")
-
-            ctx.logger.info(
-                "Financial Analysis System initialized (with Ollama LLM, no Pinecone)"
-            )
+            # Skip test call to save tokens
+            ctx.logger.info("Financial Analysis System initialized")
             self.initialized = True
             return True
         except Exception as e:
@@ -337,39 +319,18 @@ class FinancialAnalysisSystem:
         supplier_country: str,
         user_country: str,
     ) -> str:
-        """
-        Query Ollama LLM for detailed financial analysis.
-
-        Args:
-            ctx: Context for logging
-            prompt: The finance prompt to send to LLM
-            supplier_name: Name of the supplier
-            supplier_country: Supplier's country
-            user_country: User's country
-
-        Returns:
-            LLM-generated analysis text
-        """
+        """Query Google Gemini LLM for detailed financial analysis with caching"""
         try:
-            ctx.logger.info(f"Querying Ollama LLM for financial analysis...")
+            # Build the full prompt with system context
+            full_prompt = f"""You are a financial risk analyst specializing in international trade and supply chain finance. Provide concise, factual analysis.
 
-            response = self.ollama_client.chat(
-                model=self.llm_model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a financial risk analyst specializing in international trade and supply chain finance. Provide concise, factual analysis.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-            )
+{prompt}"""
 
-            llm_response = response["message"]["content"]
-            ctx.logger.info(f"✅ LLM analysis received ({len(llm_response)} chars)")
+            response = self.gemini_model.generate_content(full_prompt)
+            llm_response = response.text
             return llm_response
 
         except Exception as e:
-            ctx.logger.warning(f"⚠️ LLM query failed: {e}")
             return f"Financial analysis for {supplier_name} ({supplier_country}) trading with {user_country}."
 
     async def analyze_financial_risk(
@@ -419,8 +380,8 @@ class FinancialAnalysisSystem:
                 )
 
             supplier_country = scraped_data.get("country", "Unknown")
-            ctx.logger.info(f"📍 Supplier Country: {supplier_country}")
-            ctx.logger.info(f"📍 User Country: {user_country}")
+            ctx.logger.info(f"Supplier Country: {supplier_country}")
+            ctx.logger.info(f"User Country: {user_country}")
 
             # Step 2: Analyze trade relationship (rule-based scoring)
             analysis = analyze_country_financial_risk(
@@ -437,7 +398,7 @@ class FinancialAnalysisSystem:
                 f"Generated finance prompt for {user_country}-{supplier_country} trade"
             )
 
-            # Query Ollama LLM for detailed reasoning
+            # Query Gemini LLM for detailed reasoning
             llm_analysis = self._query_llm_for_analysis(
                 ctx=ctx,
                 prompt=prompt,
@@ -595,7 +556,6 @@ def analyze_country_financial_risk(
         or ("united states" in supplier_lower and "united states" in user_lower)
         or ("usa" in supplier_lower and "usa" in user_lower)
     ):
-        ctx.logger.info(f"📍 Domestic trade - both in same country")
         score = 90.0
         risk_factors = ["no_import_tariffs", "domestic_supply_chain"]
         trade_relationship = "Domestic trade"
@@ -607,7 +567,6 @@ def analyze_country_financial_risk(
 
     # CASE 2: Sanctioned country supplier
     if supplier_is_sanctioned:
-        ctx.logger.info(f"📍 Supplier in sanctioned country")
         score = 20.0
         risk_factors = ["international_sanctions", "trade_restrictions", "high_risk"]
         trade_relationship = "Sanctioned country - HIGH RISK"
@@ -619,7 +578,6 @@ def analyze_country_financial_risk(
 
     # CASE 3: EU to EU trade (no tariffs within EU)
     if user_is_eu and supplier_is_eu:
-        ctx.logger.info(f"📍 EU-EU trade - no internal tariffs")
         score = 88.0
         risk_factors = ["eu_single_market", "no_tariffs", "free_movement"]
         trade_relationship = "EU Single Market - Free Trade"
@@ -631,7 +589,6 @@ def analyze_country_financial_risk(
 
     # CASE 4: USMCA trade (US-Canada-Mexico free trade)
     if user_is_usmca and supplier_is_usmca:
-        ctx.logger.info(f"📍 USMCA trade - free trade agreement")
         score = 85.0
         risk_factors = ["usmca_agreement", "low_tariffs", "integrated_supply_chain"]
         trade_relationship = "USMCA Free Trade Agreement"
@@ -643,7 +600,6 @@ def analyze_country_financial_risk(
 
     # CASE 5: High tariff country supplier (China, etc.)
     if supplier_is_high_tariff:
-        ctx.logger.info(f"📍 Supplier in high tariff country")
         if "china" in supplier_lower:
             score = 50.0
             risk_factors = [
@@ -664,7 +620,6 @@ def analyze_country_financial_risk(
 
     # CASE 6: US/USMCA user importing from EU
     if user_is_usmca and supplier_is_eu:
-        ctx.logger.info(f"📍 USMCA-EU trade")
         score = 72.0
         risk_factors = [
             "standard_tariffs",
@@ -680,7 +635,6 @@ def analyze_country_financial_risk(
 
     # CASE 7: EU user importing from US/USMCA
     if user_is_eu and supplier_is_usmca:
-        ctx.logger.info(f"📍 EU-USMCA trade")
         score = 72.0
         risk_factors = [
             "standard_tariffs",
@@ -696,8 +650,6 @@ def analyze_country_financial_risk(
 
     # CASE 8: Latin American supplier
     if supplier_is_latin:
-        ctx.logger.info(f"📍 Latin American supplier")
-
         # Check for specific trade agreements
         if "chile" in supplier_lower or "peru" in supplier_lower:
             score = 68.0
@@ -726,7 +678,6 @@ def analyze_country_financial_risk(
         "new zealand",
     ]
     if any(c in supplier_lower for c in developed_economies):
-        ctx.logger.info(f"📍 Developed economy supplier")
         score = 74.0
         risk_factors = ["stable_economy", "reliable_trade_partner", "standard_tariffs"]
         trade_relationship = "Developed economy - stable trade"
@@ -737,7 +688,6 @@ def analyze_country_financial_risk(
         }
 
     # CASE 10: Default - standard international trade
-    ctx.logger.info(f"📍 Standard international trade")
     score = 64.0
     risk_factors = [
         "standard_international_tariffs",
@@ -763,15 +713,7 @@ def financial_check_node(
     analysis_system: FinancialAnalysisSystem,
     ctx: Context,
 ) -> SupplierWorkflowState:
-    """
-    Node 1: Run financial risk check.
-
-    Process:
-    1. Get supplier name, B Corp URL, and user country from state
-    2. Scrape B Corp page for supplier country
-    3. Analyze trade relationship between user country and supplier country
-    4. Return financial score and details
-    """
+    """Node 1: Run financial risk check"""
     try:
         supplier_name = state.get("supplier_name", "Unknown")
         b_corp_url = state.get("b_corp_profile_url", "")
@@ -784,34 +726,31 @@ def financial_check_node(
             state["financial_score"] = 0.0
             return state
 
-        ctx.logger.info(f"Financial analysis: {user_country} buyer ↔ {supplier_name}")
-
         # Run analysis synchronously
         import asyncio
+        import concurrent.futures
+
+        def run_async():
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                return new_loop.run_until_complete(
+                    analysis_system.analyze_financial_risk(
+                        ctx=ctx,
+                        supplier_name=supplier_name,
+                        industry=state.get("industry", ""),
+                        b_corp_url=b_corp_url,
+                        user_country=user_country,
+                    )
+                )
+            finally:
+                new_loop.close()
 
         try:
             loop = asyncio.get_running_loop()
-            import concurrent.futures
-
-            def run_async():
-                new_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(new_loop)
-                try:
-                    return new_loop.run_until_complete(
-                        analysis_system.analyze_financial_risk(
-                            ctx=ctx,
-                            supplier_name=supplier_name,
-                            industry=state.get("industry", ""),
-                            b_corp_url=b_corp_url,
-                            user_country=user_country,
-                        )
-                    )
-                finally:
-                    new_loop.close()
-
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(run_async)
-            result = future.result(timeout=120)
+                result = future.result(timeout=180)  # 3 min timeout for scraping + LLM
         except RuntimeError:
             result = asyncio.run(
                 analysis_system.analyze_financial_risk(
@@ -831,22 +770,18 @@ def financial_check_node(
         state["user_country"] = result.get("user_country", user_country)
         state["current_step"] = "financial_check_complete"
 
-        ctx.logger.info(f"Financial analysis complete")
-        ctx.logger.info(f"  User Country: {state['user_country']}")
-        ctx.logger.info(f"  Supplier Country: {state['supplier_country']}")
-        ctx.logger.info(f"  Score: {state['financial_score']}/100")
-
+        ctx.logger.info(f"Financial score: {state['financial_score']}/100")
         return state
 
     except Exception as e:
         ctx.logger.error(f"Error in financial check: {e}")
-        import traceback
-
-        traceback.print_exc()
-
         state["current_step"] = "financial_check_failed"
         state["error_message"] = f"Financial check failed: {str(e)}"
         state["financial_score"] = 0.0
+        state["risk_factors"] = [
+            f"Analysis failed: {str(e)}"
+        ]  # Set to prevent NoneType error
+        state["financial_info"] = "Analysis could not be completed due to an error"
         return state
 
 
@@ -879,9 +814,6 @@ def success_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflow
     """Node 3a: Success path - Financial requirements met."""
     state["current_step"] = "financial_approved"
     state["should_continue"] = False
-    ctx.logger.info(
-        f"✅ Financial APPROVED - Score: {state.get('financial_score', 0)}/100"
-    )
     return state
 
 
@@ -889,9 +821,6 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
     """Node 3b: Error path - Financial requirements not met."""
     state["current_step"] = "financial_rejected"
     state["should_continue"] = False
-    ctx.logger.info(
-        f"❌ Financial REJECTED - Score: {state.get('financial_score', 0)}/100"
-    )
     return state
 
 
@@ -903,21 +832,7 @@ def error_node(state: SupplierWorkflowState, ctx: Context) -> SupplierWorkflowSt
 def build_financial_workflow(
     analysis_system: FinancialAnalysisSystem, ctx: Context
 ) -> StateGraph:
-    """
-    Build the LangGraph financial workflow.
-
-    Flow:
-    START
-        ↓
-    financial_check_node (Scrape country + Analyze trade relationship)
-        ↓
-    financial_router (Check score >= 60)
-        ├─→ success_node (Score >= 60) → END
-        └─→ error_node (Score < 60 or error) → END
-
-    Returns:
-        Compiled StateGraph workflow
-    """
+    """Build the LangGraph financial workflow"""
     workflow = StateGraph(SupplierWorkflowState)
 
     # Add nodes
@@ -941,10 +856,7 @@ def build_financial_workflow(
     workflow.add_edge("success_node", END)
     workflow.add_edge("error_node", END)
 
-    compiled_workflow = workflow.compile()
-    ctx.logger.info("Financial workflow compiled (with Ollama LLM, no Pinecone)")
-
-    return compiled_workflow
+    return workflow.compile()
 
 
 # Backwards compatibility alias

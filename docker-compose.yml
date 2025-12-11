@@ -1,0 +1,125 @@
+services:
+  # ============================================
+  # SELENIUM - Headless Chrome for web scraping
+  # ============================================
+  selenium:
+    image: seleniarm/standalone-chromium
+    container_name: chainguard-selenium
+    ports:
+      - "4444:4444"
+      - "7900:7900"
+    shm_size: 2gb
+    restart: unless-stopped
+
+  # ============================================
+  # ORCHESTRATOR - The main entry point
+  # ============================================
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainguard-orchestrator
+    environment:
+      - SUPPLIER_ORCHESTRATOR_SEED=${SUPPLIER_ORCHESTRATOR_SEED}
+      - COMPLIANCE_AGENT_ADDRESS=${COMPLIANCE_AGENT_ADDRESS}
+      - FINANCIAL_AGENT_ADDRESS=${FINANCIAL_AGENT_ADDRESS}
+      - DEMAND_AGENT_ADDRESS=${DEMAND_AGENT_ADDRESS}
+      - LOGISTICS_AGENT_ADDRESS=${LOGISTICS_AGENT_ADDRESS}
+      - FIND_SUPPLIER_ADDRESS=${FIND_SUPPLIER_ADDRESS}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "8000:8000"
+    command: ["python", "-m", "agentverse.supplier_orchestrator"]
+    restart: unless-stopped
+
+  # ============================================
+  # FIND SUPPLIER AGENT
+  # ============================================
+  find-supplier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainguard-find-supplier
+    environment:
+      - FIND_SUPPLIER_SEED=${FIND_SUPPLIER_SEED}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SELENIUM_REMOTE_URL=${SELENIUM_REMOTE_URL}
+    ports:
+      - "8006:8006"
+    depends_on:
+      - selenium
+    command: ["python", "-m", "agents.supplier_search.find_supplier_agent"]
+    restart: unless-stopped
+
+  # ============================================
+  # COMPLIANCE AGENT
+  # ============================================
+  compliance:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainguard-compliance
+    environment:
+      - COMPLIANCE_AGENT_SEED=${COMPLIANCE_AGENT_SEED}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SELENIUM_REMOTE_URL=${SELENIUM_REMOTE_URL}
+    ports:
+      - "8001:8001"
+    depends_on:
+      - selenium
+    command: ["python", "-m", "agents.supplier_search.compliance_agent"]
+    restart: unless-stopped
+
+  # ============================================
+  # FINANCIAL AGENT
+  # ============================================
+  financial:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainguard-financial
+    environment:
+      - FINANCIAL_AGENT_SEED=${FINANCIAL_AGENT_SEED}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SELENIUM_REMOTE_URL=${SELENIUM_REMOTE_URL}
+    ports:
+      - "8002:8002"
+    depends_on:
+      - selenium
+    command: ["python", "-m", "agents.supplier_search.financial_agent"]
+    restart: unless-stopped
+
+  # ============================================
+  # DEMAND AGENT (Monitoring)
+  # ============================================
+  demand:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainguard-demand
+    environment:
+      - DEMAND_AGENT_SEED=${DEMAND_AGENT_SEED}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+
+    ports:
+      - "8005:8005"
+    command: ["python", "-m", "agents.monitoring.demand_agent"]
+    restart: unless-stopped
+
+  # ============================================
+  # LOGISTICS AGENT (Monitoring)
+  # ============================================
+  logistics:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chainguard-logistics
+    environment:
+      - LOGISTICS_AGENT_SEED=${LOGISTICS_AGENT_SEED}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "8008:8008"
+    command: ["python", "-m", "agents.monitoring.logistics_agent"]
+    restart: unless-stopped

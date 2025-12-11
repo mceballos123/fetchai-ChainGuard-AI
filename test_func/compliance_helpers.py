@@ -11,7 +11,6 @@ from uagents import Context
 
 from models.compliance import ComplianceResponse
 from models.financial import FinancialResponse
-from models.risk import RiskResponse
 from .test_agent_communication import verify_compliance_response_format
 
 
@@ -198,71 +197,3 @@ def validate_financial_response_before_sending(
         return False, str(e)
 
 
-def validate_risk_response_before_sending(
-    ctx: Context, response: RiskResponse
-) -> Tuple[bool, str]:
-    """
-    Validate a risk management response before sending to orchestrator.
-
-    Args:
-        ctx: Context object
-        response: RiskResponse to validate
-
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    try:
-        # Check that required fields are present
-        if not hasattr(response, "request_id") or not response.request_id:
-            return False, "Missing or invalid request_id"
-
-        if not hasattr(response, "supplier_name") or not response.supplier_name:
-            return False, "Missing or invalid supplier_name"
-
-        if not hasattr(response, "risk_score") or response.risk_score is None:
-            return False, "Missing or invalid risk_score"
-
-        # Validate risk score is in valid range
-        if not (0 <= response.risk_score <= 100):
-            return False, f"Risk score out of range: {response.risk_score}"
-
-        ctx.logger.info("Risk response validation passed")
-        return True, ""
-    except Exception as e:
-        ctx.logger.error(f"Error validating risk response: {e}")
-        return False, str(e)
-
-
-def verify_risk_connection(ctx: Context) -> Dict[str, Any]:
-    """
-    Verify that the risk management agent connection is established.
-
-    Returns:
-        Dictionary with connection status and details
-    """
-    try:
-        # Check if storage is initialized
-        supplier_history = ctx.storage.get("supplier_history")
-        request_trace = ctx.storage.get("request_trace")
-
-        is_connected = supplier_history is not None and request_trace is not None
-
-        return {
-            "status": "CONNECTED" if is_connected else "INITIALIZING",
-            "timestamp": datetime.utcnow().isoformat(),
-            "agent_address": ctx.agent.address,
-            "storage_initialized": supplier_history is not None,
-            "trace_initialized": request_trace is not None,
-            "message": (
-                "Risk Management Agent ready to process requests"
-                if is_connected
-                else "Risk Management Agent initializing"
-            ),
-        }
-    except Exception as e:
-        return {
-            "status": "ERROR",
-            "timestamp": datetime.utcnow().isoformat(),
-            "error": str(e),
-            "message": "Failed to verify risk management connection",
-        }
