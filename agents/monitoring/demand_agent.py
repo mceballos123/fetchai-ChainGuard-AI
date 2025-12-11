@@ -1,20 +1,30 @@
 from uagents import Agent, Context, Protocol
 import os
 import csv
+import re
 from typing import Dict, Any, List
+import google.generativeai as genai
 
 # Import models
 from models.demand import DemandRequest, DemandResponse
 from prompts.demand_prompt import DEMAND_FORECASE_PROMPT
+from prompts.demand_data_prompt import analyze_demand_data_prompt
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Gemini configuration - OPTIMIZED: Using lite model to reduce costs
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
 demand_agent = Agent(
     name="demand_agent",
     seed=os.getenv("DEMAND_AGENT_SEED"),
     port=8005,
-    mailbox=True,
+    endpoint=[os.getenv("DEMAND_AGENT_ENDPOINT")],  # Docker network endpoint
+    mailbox=False,  # Local communication without Agentverse mailbox
 )
 
 demand_protocol = Protocol(name="demand_protocol", version="1.0")
@@ -49,31 +59,68 @@ def load_demand_csv_data(product_category: str) -> List[Dict[str, Any]]:
     return filtered_data
 
 
-def analyze_demand_data(
-    data: List[Dict[str, Any]], product_category: str
+def format_csv_data_for_llm(data: List[Dict[str, Any]], max_rows: int = 15) -> str:
+    """
+    Format CSV data into a readable string for the LLM to analyze.
+    OPTIMIZED: Removed detailed row data, keeping only statistics to save tokens.
+    """
+    if not data:
+        return "No data available"
+
+    headers = list(data[0].keys())
+
+    formatted = "CSV Data Summary:\n"
+    formatted += "-" * 60 + "\n"
+    formatted += f"Total rows: {len(data)}\n"
+    formatted += f"Columns: {', '.join(headers)}\n"
+    formatted += "-" * 60 + "\n\n"
+
+    formatted += "Data Statistics:\n"
+    formatted += "-" * 40 + "\n"
+
+    try:
+        prices = [float(row.get("Price", 0)) for row in data]
+        availability = [int(row.get("Availability", 0)) for row in data]
+        sold = [int(row.get("Number of products sold", 0)) for row in data]
+        revenue = [float(row.get("Revenue generated", 0)) for row in data]
+
+        formatted += f"Average Price: ${sum(prices)/len(prices):.2f}\n"
+        formatted += (
+            f"Average Availability: {sum(availability)/len(availability):.1f}%\n"
+        )
+        formatted += f"Total Products Sold: {sum(sold):,}\n"
+        formatted += f"Total Revenue: ${sum(revenue):,.2f}\n"
+        formatted += f"Low Availability (<30%): {len([a for a in availability if a < 30])} items\n"
+        formatted += f"High Availability (>70%): {len([a for a in availability if a > 70])} items\n"
+    except Exception as e:
+        formatted += f"Could not calculate statistics: {e}\n"
+
+    return formatted
+
+
+def analyze_demand_with_gemini(
+    data: List[Dict[str, Any]], product_category: str, supplier_name: str
 ) -> Dict[str, Any]:
     """
-    Analyze demand data for delays, quality, and shipping insights.
-
-    CSV columns: Product type, SKU, Price, Availability, Number of products sold,
-                 Revenue generated, Customer demographics
+    Use Google Gemini LLM to analyze demand data using the DEMAND_FORECASE_PROMPT.
 
     Args:
         data: List of filtered demand data rows
         product_category: The product category being analyzed
+        supplier_name: Name of the supplier
 
     Returns:
-        Dictionary with demand insights
+        Dictionary with demand insights from LLM analysis
     """
     insights = {
         "delay_status": "ON TIME",
         "delay_details": "",
         "shipping_status": "NORMAL",
         "shipping_details": "",
-        "quality_status": "EXCELLENT",
+        "quality_status": "GOOD",
         "quality_details": "",
         "alerts": [],
-        "overall_performance": "EXCELLENT",
+        "overall_performance": "GOOD",
     }
 
     if not data:
@@ -85,119 +132,80 @@ def analyze_demand_data(
         )
         return insights
 
-    # Analyze the data
-    total_products = len(data)
-    total_sold = 0
-    total_revenue = 0
-    low_availability_count = 0
-    high_price_count = 0
+    try:
+        data_summary = format_csv_data_for_llm(data)
 
-    for row in data:
-        try:
-            availability = int(row.get("Availability", 0))
-            products_sold = int(row.get("Number of products sold", 0))
-            revenue = float(row.get("Revenue generated", 0))
-            price = float(row.get("Price", 0))
+        full_prompt = analyze_demand_data_prompt(DEMAND_FORECASE_PROMPT, supplier_name, product_category, data_summary)
 
-            total_sold += products_sold
-            total_revenue += revenue
+        response = gemini_model.generate_content(full_prompt)
+        llm_response = response.text
 
-            # Check for low availability (potential delays)
-            if availability < 30:
-                low_availability_count += 1
-
-            # Check for high-priced items (quality indicator)
-            if price > 70:
-                high_price_count += 1
-
-        except (ValueError, TypeError):
-            continue
-
-    avg_sold = total_sold / total_products if total_products > 0 else 0
-    avg_revenue = total_revenue / total_products if total_products > 0 else 0
-
-    # Determine delay status based on availability
-    low_availability_ratio = (
-        low_availability_count / total_products if total_products > 0 else 0
-    )
-    if low_availability_ratio > 0.5:
-        insights["delay_status"] = "DELAYS DETECTED"
+        # Parse LLM response
+        insights["delay_status"] = extract_field(
+            llm_response, "DELAY_STATUS", "ON TIME"
+        )
         insights["delay_details"] = (
-            f"High demand detected: {low_availability_count}/{total_products} {product_category} products "
-            f"have low availability (<30%). Average products sold: {avg_sold:.0f}. "
-            f"Consider restocking to meet demand."
+            f"ChainGuard AI Analysis: {extract_field(llm_response, 'DELAY_DETAILS', 'Analysis pending')}"
         )
-        insights["alerts"].append(
-            f"Low availability on {low_availability_count} {product_category} items"
+        insights["shipping_status"] = extract_field(
+            llm_response, "SHIPPING_STATUS", "NORMAL"
         )
-    elif low_availability_ratio > 0.3:
-        insights["delay_status"] = "MONITOR: AVAILABILITY"
+        insights["shipping_details"] = (
+            f"ChainGuard AI Analysis: {extract_field(llm_response, 'SHIPPING_DETAILS', 'Analysis pending')}"
+        )
+        insights["quality_status"] = extract_field(
+            llm_response, "QUALITY_STATUS", "GOOD"
+        )
+        insights["quality_details"] = (
+            f"ChainGuard AI Analysis: {extract_field(llm_response, 'QUALITY_DETAILS', 'Analysis pending')}"
+        )
+        insights["overall_performance"] = extract_field(
+            llm_response, "OVERALL_PERFORMANCE", "GOOD"
+        )
+
+        # Parse alerts
+        alerts_text = extract_field(llm_response, "ALERTS", "None")
+        if alerts_text.lower() != "none" and alerts_text:
+            insights["alerts"] = [
+                a.strip() for a in alerts_text.split(";") if a.strip()
+            ]
+
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        # Fallback to basic analysis
         insights["delay_details"] = (
-            f"Moderate demand pressure: {low_availability_count}/{total_products} {product_category} products "
-            f"have limited availability. Monitor closely for potential delays."
+            f"ChainGuard AI Analysis: Monitoring {len(data)} {product_category} products. "
+            f"LLM analysis unavailable - using default assessment."
         )
-        insights["alerts"].append("Moderate availability constraints detected")
-    else:
-        insights["delay_status"] = "ON TIME"
-        insights["delay_details"] = (
-            f"Good availability across {product_category} products. {total_products} SKUs monitored "
-            f"with average revenue of ${avg_revenue:.2f} per product."
-        )
-
-    # Determine shipping status based on sales volume
-    if avg_sold > 500:
-        insights["shipping_status"] = "HIGH VOLUME"
         insights["shipping_details"] = (
-            f"High shipping volume for {product_category}: Average {avg_sold:.0f} units sold per SKU. "
-            f"Ensure logistics capacity can handle demand."
+            f"ChainGuard AI Analysis: Standard shipping volume for {product_category}."
         )
-        insights["alerts"].append("High shipping volume - monitor logistics capacity")
-    elif avg_sold > 300:
-        insights["shipping_status"] = "MODERATE VOLUME"
-        insights["shipping_details"] = (
-            f"Moderate shipping activity for {product_category}: Average {avg_sold:.0f} units per SKU. "
-            f"Shipping operations within normal parameters."
-        )
-    else:
-        insights["shipping_status"] = "NORMAL"
-        insights["shipping_details"] = (
-            f"Standard shipping volume for {product_category}: Average {avg_sold:.0f} units per SKU. "
-            f"No shipping concerns detected."
-        )
-
-    # Determine quality status based on price distribution (premium products = quality focus)
-    quality_ratio = high_price_count / total_products if total_products > 0 else 0
-    if quality_ratio > 0.3:
-        insights["quality_status"] = "PREMIUM"
         insights["quality_details"] = (
-            f"Premium {product_category} portfolio: {high_price_count}/{total_products} products are high-value items. "
-            f"Maintain strict quality control for premium products."
+            f"ChainGuard AI Analysis: Quality monitoring active for {product_category}."
         )
-    elif quality_ratio > 0.1:
-        insights["quality_status"] = "GOOD"
-        insights["quality_details"] = (
-            f"Balanced {product_category} portfolio with mix of price points. "
-            f"Quality standards being maintained across product range."
-        )
-    else:
-        insights["quality_status"] = "STANDARD"
-        insights["quality_details"] = (
-            f"Standard {product_category} products in portfolio. "
-            f"Regular quality monitoring recommended."
-        )
-
-    # Determine overall performance
-    alert_count = len(insights["alerts"])
-    if alert_count == 0:
-        insights["overall_performance"] = "EXCELLENT"
-    elif alert_count == 1:
-        insights["overall_performance"] = "GOOD"
-    elif alert_count == 2:
-        insights["overall_performance"] = "FAIR"
-    else:
-        insights["overall_performance"] = "POOR"
 
     return insights
+
+
+def extract_field(text: str, field_name: str, default: str = "") -> str:
+    """Extract a field value from LLM response."""
+    patterns = [
+        rf"{field_name}:\s*(.+?)(?=\n[A-Z_]+:|$)",
+        rf"\*\*{field_name}\*\*:\s*(.+?)(?=\n|$)",
+        rf"{field_name}\s*[:=]\s*(.+?)(?=\n|$)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if match:
+            value = match.group(1).strip()
+            # Clean up the value
+            value = re.sub(r"^\[|\]$", "", value)
+            value = value.strip()
+            if value:
+                return value
+
+    return default
 
 
 @demand_agent.on_event("startup")
@@ -235,12 +243,12 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
     Process:
     1. Receive supplier name and product category from orchestrator
     2. Load demand CSV data and filter by product category
-    3. Analyze filtered data for delays, quality, and shipping insights
+    3. Use Gemini LLM to analyze the data with the prompt
     4. Return demand forecast update to orchestrator
     """
     ctx.logger.info("")
     ctx.logger.info("=" * 70)
-    ctx.logger.info("📥 DEMAND AGENT: RECEIVED REQUEST")
+    ctx.logger.info("DEMAND AGENT: RECEIVED REQUEST")
     ctx.logger.info("=" * 70)
     ctx.logger.info(f"From: {sender}")
     ctx.logger.info(f"Request ID: {msg.request_id}")
@@ -256,8 +264,12 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
         demand_data = load_demand_csv_data(product_category)
         ctx.logger.info(f"Found {len(demand_data)} {product_category} products")
 
-        # Analyze the filtered data
-        insights = analyze_demand_data(demand_data, product_category)
+        # Analyze with Gemini LLM
+        ctx.logger.info("Sending data to Gemini for analysis...")
+        insights = analyze_demand_with_gemini(
+            demand_data, product_category, msg.supplier_name
+        )
+        ctx.logger.info("Gemini analysis complete")
 
         # Build response from analyzed insights
         response = DemandResponse(
@@ -276,7 +288,7 @@ async def handle_demand_request(ctx: Context, sender: str, msg: DemandRequest):
 
         ctx.logger.info("")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("📤 DEMAND AGENT: SENDING RESPONSE")
+        ctx.logger.info("DEMAND AGENT: SENDING RESPONSE")
         ctx.logger.info("=" * 70)
         ctx.logger.info(f"To: {sender}")
         ctx.logger.info(f"Overall Performance: {response.overall_performance}")

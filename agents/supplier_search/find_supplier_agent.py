@@ -7,6 +7,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.remote.webdriver import WebDriver as RemoteWebDriver
 from langgraph.graph import StateGraph, START, END
 from uagents import Agent, Context, Protocol
 from models.find_supplier import (
@@ -153,10 +154,18 @@ async def search_b_corp_directory(
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--window-size=1920,1080")
         chrome_options.add_argument(
-            "--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            os.getenv("CHROME_USER_AGENT")
         )
 
-        driver = webdriver.Chrome(options=chrome_options)
+        # Use Remote Selenium if SELENIUM_REMOTE_URL is set (Docker), else local Chrome
+        selenium_url = os.getenv("SELENIUM_REMOTE_URL")
+        if selenium_url:
+            ctx.logger.info(f"Using remote Selenium at: {selenium_url}")
+            driver = webdriver.Remote(
+                command_executor=selenium_url, options=chrome_options
+            )
+        else:
+            driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(60)
         driver.get(search_url)
         time.sleep(8)
@@ -182,12 +191,15 @@ async def search_b_corp_directory(
                 ctx.logger.info("🌐 Loaded company profile page")
         except Exception as e:
             ctx.logger.warning(f"Could not navigate to profile: {e}")
-            # Check if driver is still alive
+            # Check if driver is still responsive (works for both local and remote WebDriver)
             try:
-                if not driver or driver.service.process is None:
-                    ctx.logger.error("Driver died while navigating, stopping")
+                if driver:
+                    _ = driver.current_url  # Quick responsiveness check
+                else:
+                    ctx.logger.error("Driver is None, stopping")
                     raise
-            except:
+            except Exception:
+                ctx.logger.error("Driver not responsive, stopping")
                 raise
 
         html_content = driver.page_source
@@ -199,7 +211,7 @@ async def search_b_corp_directory(
             potential_name = h1_tag.get_text(strip=True)
             if potential_name and len(potential_name) > 2 and len(potential_name) < 100:
                 first_company = potential_name
-                ctx.logger.info(f"✅ Found company name: {first_company}")
+                ctx.logger.info(f"Found company name: {first_company}")
 
         if not first_company:
             company_span = soup.find("span", {"data-testid": "company-name-desktop"})
@@ -218,7 +230,7 @@ async def search_b_corp_directory(
                 first_company = matches[0].strip()
 
         if not first_company:
-            ctx.logger.warning("❌ Could not extract company name")
+            ctx.logger.warning("Could not extract company name")
             return {
                 "success": False,
                 "results": [],
@@ -411,7 +423,7 @@ async def startup(ctx: Context):
     ctx.storage.set("processed_request_ids", [])
 
     ctx.logger.info(
-        "✅ Find Supplier Agent Ready - Listening for FindSupplierRequest messages..."
+        "Find Supplier Agent Ready - Listening for FindSupplierRequest messages..."
     )
 
 
@@ -557,11 +569,8 @@ async def handle_find_supplier_request(
 
         final_state = supplier_search_graph.invoke(initial_state)
 
-        ctx.logger.info("")
-        ctx.logger.info("=" * 70)
-        ctx.logger.info("✅ LangGraph Workflow Completed")
-        ctx.logger.info("=" * 70)
-
+        ctx.logger.info("LangGraph Workflow Completed")
+  
         if final_state["success"] and final_state["best_supplier"]:
             best_supplier = final_state["best_supplier"]
 
@@ -591,19 +600,14 @@ async def handle_find_supplier_request(
             )
             ctx.storage.set("search_history", search_history)
 
-            ctx.logger.info("")
-            ctx.logger.info("=" * 70)
-            ctx.logger.info("📤 FIND SUPPLIER AGENT: SENDING RESPONSE")
-            ctx.logger.info("=" * 70)
             ctx.logger.info(f"To: {sender}")
             ctx.logger.info(f"Request ID: {msg.request_id}")
             ctx.logger.info(f"Success: True")
             ctx.logger.info(f"Supplier: {best_supplier.company_name}")
-            ctx.logger.info("=" * 70)
 
             await ctx.send(sender, response)
         else:
-            ctx.logger.warning("❌ No supplier found")
+            ctx.logger.warning("No supplier found")
             ctx.logger.warning(
                 f"Error: {final_state.get('error_message', 'No suppliers found')}"
             )
@@ -617,16 +621,10 @@ async def handle_find_supplier_request(
                 error_message=final_state.get("error_message", "No suppliers found"),
             )
 
-            ctx.logger.info("")
-            ctx.logger.info("=" * 70)
-            ctx.logger.info("📤 FIND SUPPLIER AGENT: SENDING ERROR RESPONSE")
-            ctx.logger.info("=" * 70)
             ctx.logger.info(f"To: {sender}")
             ctx.logger.info(f"Request ID: {msg.request_id}")
             ctx.logger.info(f"Success: False")
             ctx.logger.info(f"Error: {error_response.error_message}")
-            ctx.logger.info("=" * 70)
-
             await ctx.send(sender, error_response)
 
     except Exception as e:

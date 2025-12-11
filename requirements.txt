@@ -17,12 +17,16 @@ langchain-community
 langsmith
 
 # ============================================================================
-# LLAMAINDEX (RAG System)
+# GOOGLE GEMINI (LLM)
+# ============================================================================
+google-generativeai
+
+# ============================================================================
+# LLAMAINDEX (RAG System - kept for compatibility)
 # ============================================================================
 llama-index
 llama-index-core
 llama-index-embeddings-openai
-llama-index-llms-ollama
 llama-index-vector-stores-pinecone
 
 pinecone-client

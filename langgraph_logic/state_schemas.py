@@ -2,7 +2,7 @@
 State schemas for LangGraph workflows in the Find Supplier system.
 
 This module defines TypedDict schemas that track state as it flows through
-the workflow nodes (Find Supplier -> Compliance -> Financial -> Risk).
+the workflow nodes (Find Supplier -> Compliance -> Financial).
 """
 
 from typing import TypedDict, List, Dict, Any, Optional, Annotated
@@ -33,7 +33,9 @@ class SupplierWorkflowState(TypedDict):
     company_values: str
     industry: str
     product_needed: str
-    user_country: Optional[str]  # User's country (e.g., "Germany") - default: United States
+    user_country: Optional[
+        str
+    ]  # User's country (e.g., "Germany") - default: United States
 
     # Supplier search results (from Pinecone vector DB)
     supplier_name: Optional[str]
@@ -54,11 +56,6 @@ class SupplierWorkflowState(TypedDict):
     # Financial agent results - RAG from financial_files/
     financial_score: Optional[float]  # 0-100, higher = lower risk (better)
     financial_info: Optional[str]  # Summary: tariffs, inflation, economic risks
-
-    # Risk management agent results - RAG from risk_management_files/
-    risk_score: Optional[float]  # 0-100, higher = better (lower risk)
-    risk_details: Optional[str]  # Summary: capacity, disasters, logistics
-    risk_factors: Optional[List[str]]  # List of identified risk factors
 
     # Workflow control
     current_step: str  # Track which node we're in

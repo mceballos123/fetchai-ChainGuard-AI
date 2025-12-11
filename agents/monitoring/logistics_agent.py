@@ -1,20 +1,30 @@
 from uagents import Agent, Context, Protocol
 import os
 import csv
+import re
 from typing import Dict, Any, List
+import google.generativeai as genai
 
 # Import models
 from models.logistics import LogisticsRequest, LogisticsResponse
 from prompts.logistics_prompt import LOGISTICS_PROMPT
+from prompts.logistics_data_prompt import analyze_logistics_data_prompt
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Gemini configuration
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
 logistics_agent = Agent(
     name="logistics_agent",
     seed=os.getenv("LOGISTICS_AGENT_SEED"),
     port=8008,
-    mailbox=True,
+    endpoint=[os.getenv("LOGISTICS_AGENT_ENDPOINT")],  # Docker network endpoint
+    mailbox=False,  # Local communication without Agentverse mailbox
 )
 
 logistics_protocol = Protocol(name="logistics_protocol", version="1.0")
@@ -49,21 +59,87 @@ def load_logistics_csv_data(product_category: str) -> List[Dict[str, Any]]:
     return filtered_data
 
 
-def analyze_logistics_data(
-    data: List[Dict[str, Any]], product_category: str
+def format_csv_data_for_llm(data: List[Dict[str, Any]], max_rows: int = 15) -> str:
+    """
+    Format CSV data into a readable string for the LLM to analyze.
+    """
+    if not data:
+        return "No data available"
+
+    headers = list(data[0].keys())
+
+    formatted = "CSV Data Summary:\n"
+    formatted += "-" * 60 + "\n"
+    formatted += f"Total rows: {len(data)}\n"
+    formatted += f"Columns: {', '.join(headers)}\n"
+    formatted += "-" * 60 + "\n\n"
+
+    formatted += f"Sample Data (first {min(max_rows, len(data))} rows):\n\n"
+
+    for i, row in enumerate(data[:max_rows]):
+        formatted += f"Row {i+1}:\n"
+        for key, value in row.items():
+            formatted += f"  {key}: {value}\n"
+        formatted += "\n"
+
+    formatted += "\nData Statistics:\n"
+    formatted += "-" * 40 + "\n"
+
+    try:
+        lead_times = [int(row.get("Lead times", 0)) for row in data]
+        shipping_times = [int(row.get("Shipping times", 0)) for row in data]
+        shipping_costs = [float(row.get("Shipping costs", 0)) for row in data]
+        costs = [float(row.get("Costs", 0)) for row in data]
+
+        formatted += f"Average Lead Time: {sum(lead_times)/len(lead_times):.1f} days\n"
+        formatted += f"Average Shipping Time: {sum(shipping_times)/len(shipping_times):.1f} days\n"
+        formatted += (
+            f"Average Shipping Cost: ${sum(shipping_costs)/len(shipping_costs):.2f}\n"
+        )
+        formatted += f"Average Total Cost: ${sum(costs)/len(costs):.2f}\n"
+        formatted += f"Long Lead Time (>20 days): {len([lt for lt in lead_times if lt > 20])} items\n"
+        formatted += f"Short Lead Time (<7 days): {len([lt for lt in lead_times if lt < 7])} items\n"
+
+        # Count carriers
+        carriers = {}
+        for row in data:
+            carrier = row.get("Shipping carriers", "Unknown")
+            carriers[carrier] = carriers.get(carrier, 0) + 1
+        formatted += f"Carriers: {carriers}\n"
+
+        # Count transport modes
+        modes = {}
+        for row in data:
+            mode = row.get("Transportation modes", "Unknown")
+            modes[mode] = modes.get(mode, 0) + 1
+        formatted += f"Transport Modes: {modes}\n"
+
+        # Count locations
+        locations = {}
+        for row in data:
+            loc = row.get("Location", "Unknown")
+            locations[loc] = locations.get(loc, 0) + 1
+        formatted += f"Supplier Locations: {locations}\n"
+
+    except Exception as e:
+        formatted += f"Could not calculate statistics: {e}\n"
+
+    return formatted
+
+
+def analyze_logistics_with_gemini(
+    data: List[Dict[str, Any]], product_category: str, supplier_name: str
 ) -> Dict[str, Any]:
     """
-    Analyze logistics data for inventory levels and predictions.
-
-    CSV columns: Product type, SKU, Lead times, Shipping times, Shipping carriers,
-                 Shipping costs, Transportation modes, Routes, Costs, Supplier name, Location
+    Use Google Gemini LLM to analyze logistics data using the LOGISTICS_PROMPT.
 
     Args:
         data: List of filtered logistics data rows
         product_category: The product category being analyzed
+        supplier_name: Name of the supplier
 
     Returns:
-        Dictionary with logistics and inventory insights
+        Dictionary with logistics and inventory insights from LLM analysis
     """
     insights = {
         "current_inventory_level": "MEDIUM",
@@ -89,168 +165,95 @@ def analyze_logistics_data(
         )
         return insights
 
-    # Analyze the data
+    # Calculate estimated inventory for the response
     total_products = len(data)
-    total_lead_time = 0
-    total_shipping_time = 0
-    total_shipping_cost = 0
-    total_transport_cost = 0
-    long_lead_time_count = 0
-    high_cost_count = 0
-
-    # Track transportation modes and routes
-    transport_modes = {}
-    carriers = {}
-    locations = {}
-
-    for row in data:
-        try:
-            lead_time = int(row.get("Lead times", 0))
-            shipping_time = int(row.get("Shipping times", 0))
-            shipping_cost = float(row.get("Shipping costs", 0))
-            transport_cost = float(row.get("Costs", 0))
-            transport_mode = row.get("Transportation modes", "Unknown")
-            carrier = row.get("Shipping carriers", "Unknown")
-            location = row.get("Location", "Unknown")
-
-            total_lead_time += lead_time
-            total_shipping_time += shipping_time
-            total_shipping_cost += shipping_cost
-            total_transport_cost += transport_cost
-
-            # Track long lead times (>20 days)
-            if lead_time > 20:
-                long_lead_time_count += 1
-
-            # Track high cost shipments
-            if transport_cost > 700:
-                high_cost_count += 1
-
-            # Count transport modes
-            transport_modes[transport_mode] = transport_modes.get(transport_mode, 0) + 1
-
-            # Count carriers
-            carriers[carrier] = carriers.get(carrier, 0) + 1
-
-            # Count locations
-            locations[location] = locations.get(location, 0) + 1
-
-        except (ValueError, TypeError):
-            continue
-
-    avg_lead_time = total_lead_time / total_products if total_products > 0 else 0
-    avg_shipping_time = (
-        total_shipping_time / total_products if total_products > 0 else 0
-    )
-    avg_shipping_cost = (
-        total_shipping_cost / total_products if total_products > 0 else 0
-    )
-    avg_transport_cost = (
-        total_transport_cost / total_products if total_products > 0 else 0
-    )
-
-    # Estimate inventory based on lead times and product count
-    # Lower lead times = higher inventory availability
-    estimated_inventory = int(total_products * (30 - avg_lead_time) * 100)
-    if estimated_inventory < 0:
-        estimated_inventory = total_products * 500
+    try:
+        lead_times = [int(row.get("Lead times", 0)) for row in data]
+        avg_lead_time = sum(lead_times) / len(lead_times)
+        estimated_inventory = int(total_products * (30 - avg_lead_time) * 100)
+        if estimated_inventory < 0:
+            estimated_inventory = total_products * 500
+    except Exception:
+        estimated_inventory = total_products * 1000
+        avg_lead_time = 15
 
     insights["current_inventory_units"] = estimated_inventory
+    insights["predicted_inventory_units"] = int(estimated_inventory * 0.85)
 
-    # Determine inventory level
-    if estimated_inventory > 50000:
-        insights["current_inventory_level"] = "HIGH"
-    elif estimated_inventory > 20000:
-        insights["current_inventory_level"] = "MEDIUM"
-    elif estimated_inventory > 5000:
-        insights["current_inventory_level"] = "LOW"
-    else:
-        insights["current_inventory_level"] = "CRITICAL"
+    try:
+        data_summary = format_csv_data_for_llm(data)
 
-    # Build inventory details
-    most_common_mode = (
-        max(transport_modes, key=transport_modes.get) if transport_modes else "Unknown"
-    )
-    most_common_carrier = max(carriers, key=carriers.get) if carriers else "Unknown"
-    most_common_location = max(locations, key=locations.get) if locations else "Unknown"
+        full_prompt = analyze_logistics_data_prompt(LOGISTICS_PROMPT, supplier_name, product_category, estimated_inventory, data_summary)
 
-    insights["inventory_details"] = (
-        f"Monitoring {total_products} {product_category} SKUs. "
-        f"Primary transport: {most_common_mode}. Main carrier: {most_common_carrier}. "
-        f"Primary source: {most_common_location}. Avg shipping cost: ${avg_shipping_cost:.2f}."
-    )
+        response = gemini_model.generate_content(full_prompt)
+        llm_response = response.text
 
-    # Predict future inventory based on lead times
-    if avg_lead_time > 20:
-        insights["predicted_inventory_level"] = "LOW"
-        predicted_units = int(estimated_inventory * 0.6)
-        insights["predicted_inventory_units"] = predicted_units
+        # Parse LLM response
+        insights["current_inventory_level"] = extract_field(
+            llm_response, "CURRENT_INVENTORY_LEVEL", "MEDIUM"
+        )
+        insights["inventory_details"] = (
+            f"ChainGuard AI Analysis: {extract_field(llm_response, 'INVENTORY_DETAILS', 'Analysis pending')}"
+        )
+        insights["predicted_inventory_level"] = extract_field(
+            llm_response, "PREDICTED_INVENTORY_LEVEL", "MEDIUM"
+        )
         insights["inventory_forecast"] = (
-            f"Long average lead time ({avg_lead_time:.0f} days) for {product_category}. "
-            f"Inventory expected to decrease to {predicted_units:,} units. "
-            f"Recommend accelerating restocking orders."
+            f"ChainGuard AI Analysis: {extract_field(llm_response, 'INVENTORY_FORECAST', 'Analysis pending')}"
         )
-        insights["alerts"].append(
-            f"High lead times ({avg_lead_time:.0f} days) - plan restocking early"
+        insights["restocking_status"] = extract_field(
+            llm_response, "RESTOCKING_STATUS", "ON_TIME"
         )
-    elif avg_lead_time > 15:
-        insights["predicted_inventory_level"] = "MEDIUM"
-        predicted_units = int(estimated_inventory * 0.8)
-        insights["predicted_inventory_units"] = predicted_units
+        insights["restocking_details"] = (
+            f"ChainGuard AI Analysis: {extract_field(llm_response, 'RESTOCKING_DETAILS', 'Analysis pending')}"
+        )
+        insights["overall_logistics_status"] = extract_field(
+            llm_response, "OVERALL_LOGISTICS_STATUS", "HEALTHY"
+        )
+
+        # Parse alerts
+        alerts_text = extract_field(llm_response, "ALERTS", "None")
+        if alerts_text.lower() != "none" and alerts_text:
+            insights["alerts"] = [
+                a.strip() for a in alerts_text.split(";") if a.strip()
+            ]
+
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        # Fallback to basic analysis
+        insights["inventory_details"] = (
+            f"ChainGuard AI Analysis: Monitoring {total_products} {product_category} products. "
+            f"Estimated inventory: {estimated_inventory:,} units. LLM analysis unavailable."
+        )
         insights["inventory_forecast"] = (
-            f"Moderate lead times ({avg_lead_time:.0f} days) for {product_category}. "
-            f"Inventory forecast: {predicted_units:,} units. Monitor closely."
+            f"ChainGuard AI Analysis: Based on avg lead time of {avg_lead_time:.0f} days."
         )
-    else:
-        insights["predicted_inventory_level"] = "STABLE"
-        predicted_units = int(estimated_inventory * 0.95)
-        insights["predicted_inventory_units"] = predicted_units
-        insights["inventory_forecast"] = (
-            f"Good lead times ({avg_lead_time:.0f} days) for {product_category}. "
-            f"Inventory expected to remain stable at ~{predicted_units:,} units."
-        )
-
-    # Determine restocking status
-    long_lead_ratio = long_lead_time_count / total_products if total_products > 0 else 0
-    if long_lead_ratio > 0.4:
-        insights["restocking_status"] = "DELAYED"
         insights["restocking_details"] = (
-            f"{long_lead_time_count}/{total_products} {product_category} items have extended lead times (>20 days). "
-            f"Average shipping time: {avg_shipping_time:.0f} days. Consider alternative suppliers or expedited shipping."
+            f"ChainGuard AI Analysis: Restocking monitoring active for {product_category}."
         )
-        insights["alerts"].append("Multiple items with extended lead times")
-    elif long_lead_ratio > 0.2:
-        insights["restocking_status"] = "MONITOR"
-        insights["restocking_details"] = (
-            f"Some {product_category} items have extended lead times. "
-            f"Average lead time: {avg_lead_time:.0f} days, shipping: {avg_shipping_time:.0f} days."
-        )
-    else:
-        insights["restocking_status"] = "ON_TIME"
-        insights["restocking_details"] = (
-            f"Restocking on schedule for {product_category}. "
-            f"Average lead time: {avg_lead_time:.0f} days, shipping: {avg_shipping_time:.0f} days. "
-            f"Avg transport cost: ${avg_transport_cost:.2f}."
-        )
-
-    # Check for high cost alerts
-    if high_cost_count > total_products * 0.3:
-        insights["alerts"].append(
-            f"High transport costs on {high_cost_count} items - review logistics routes"
-        )
-
-    # Determine overall logistics status
-    alert_count = len(insights["alerts"])
-    if alert_count == 0:
-        insights["overall_logistics_status"] = "HEALTHY"
-    elif alert_count == 1:
-        insights["overall_logistics_status"] = "HEALTHY"
-    elif alert_count == 2:
-        insights["overall_logistics_status"] = "WARNING"
-    else:
-        insights["overall_logistics_status"] = "CRITICAL"
 
     return insights
+
+
+def extract_field(text: str, field_name: str, default: str = "") -> str:
+    """Extract a field value from LLM response."""
+    patterns = [
+        rf"{field_name}:\s*(.+?)(?=\n[A-Z_]+:|$)",
+        rf"\*\*{field_name}\*\*:\s*(.+?)(?=\n|$)",
+        rf"{field_name}\s*[:=]\s*(.+?)(?=\n|$)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if match:
+            value = match.group(1).strip()
+            # Clean up the value
+            value = re.sub(r"^\[|\]$", "", value)
+            value = value.strip()
+            if value:
+                return value
+
+    return default
 
 
 @logistics_agent.on_event("startup")
@@ -288,12 +291,12 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
     Process:
     1. Receive supplier name and product category from orchestrator
     2. Load logistics CSV data and filter by product category
-    3. Analyze filtered data for inventory levels and predictions
+    3. Use Gemini LLM to analyze the data with the prompt
     4. Return logistics monitoring update to orchestrator
     """
     ctx.logger.info("")
     ctx.logger.info("=" * 70)
-    ctx.logger.info("📥 LOGISTICS AGENT: RECEIVED REQUEST")
+    ctx.logger.info("LOGISTICS AGENT: RECEIVED REQUEST")
     ctx.logger.info("=" * 70)
     ctx.logger.info(f"From: {sender}")
     ctx.logger.info(f"Request ID: {msg.request_id}")
@@ -309,8 +312,12 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
         logistics_data = load_logistics_csv_data(product_category)
         ctx.logger.info(f"Found {len(logistics_data)} {product_category} products")
 
-        # Analyze the filtered data
-        insights = analyze_logistics_data(logistics_data, product_category)
+        # Analyze with Gemini LLM
+        ctx.logger.info("Sending data to Gemini for analysis...")
+        insights = analyze_logistics_with_gemini(
+            logistics_data, product_category, msg.supplier_name
+        )
+        ctx.logger.info("Gemini analysis complete")
 
         # Build response from analyzed insights
         response = LogisticsResponse(
@@ -331,7 +338,7 @@ async def handle_logistics_request(ctx: Context, sender: str, msg: LogisticsRequ
 
         ctx.logger.info("")
         ctx.logger.info("=" * 70)
-        ctx.logger.info("📤 LOGISTICS AGENT: SENDING RESPONSE")
+        ctx.logger.info("LOGISTICS AGENT: SENDING RESPONSE")
         ctx.logger.info("=" * 70)
         ctx.logger.info(f"To: {sender}")
         ctx.logger.info(f"Overall Status: {response.overall_logistics_status}")
