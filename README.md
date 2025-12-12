@@ -1,4 +1,4 @@
-## ChainGuard-AI
+# ChainGuard-AI
 
 # Getting Started
 
