@@ -1460,6 +1460,85 @@ async def handle_logistics_response(ctx: Context, sender: str, msg: LogisticsRes
         traceback.print_exc()
 
 
+async def store_supplier_data_in_supabase(
+    ctx: Context,
+    supplier_name: str,
+    compliance_response: Dict[str, Any],
+    financial_response: Dict[str, Any],
+    supplier_info: str,
+) -> bool:
+    """
+    Store supplier analysis results in Supabase database.
+
+    Args:
+        ctx: Agent context
+        supplier_name: Name of the supplier
+        compliance_response: Compliance agent response data
+        financial_response: Financial agent response data
+        supplier_info: Recommendation text (Approved/Not Approved)
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    global supabase_client
+
+    try:
+        if not supabase_client:
+            ctx.logger.warning(
+                "Supabase client not initialized - skipping data storage"
+            )
+            return False
+
+        # Format compliance text
+        supplier_compliance = f"""Compliance Score: {compliance_response.get('compliance_score')}/100
+
+Ethics & Worker Treatment:
+{compliance_response.get('ethics_info', 'N/A')}
+
+Sustainability Practices:
+{compliance_response.get('sustainability_info', 'N/A')}
+
+Violations: {', '.join(compliance_response.get('violations', [])) if compliance_response.get('violations') else 'None'}"""
+
+        # Format financial text
+        supplier_finance = f"""Financial Score: {financial_response.get('financial_score')}/100
+
+{financial_response.get('financial_details', 'N/A')}
+
+Risk Factors: {', '.join(financial_response.get('risk_factors', [])) if financial_response.get('risk_factors') else 'None'}
+
+Trade Route: {financial_response.get('user_country', 'N/A')} → {financial_response.get('supplier_country', 'N/A')}"""
+
+        # Prepare data for insertion
+        supplier_data = {
+            "supplier_name": supplier_name,
+            "supplier_compliance": supplier_compliance,
+            "supplier_finance": supplier_finance,
+            "supplier_info": supplier_info,
+        }
+
+        ctx.logger.info("Storing supplier data in Supabase...")
+        ctx.logger.info(f"   Supplier: {supplier_name}")
+        ctx.logger.info(f"   Recommendation: {supplier_info}")
+
+        # Insert data into Find_supplier table
+        result = supabase_client.table("Find_supplier").insert(supplier_data).execute()
+
+        ctx.logger.info("Successfully stored supplier data in Supabase")
+        ctx.logger.info(
+            f"   Record ID: {result.data[0]['id'] if result.data else 'N/A'}"
+        )
+
+        return True
+
+    except Exception as e:
+        ctx.logger.error(f"Error storing supplier data in Supabase: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
 async def store_monitoring_data_in_supabase(
     ctx: Context,
     supplier_name: str,
@@ -1710,6 +1789,23 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
     financial_passed = financial_response.get("financial_score", 0) >= 60
     overall_approved = compliance_passed and financial_passed
 
+    # Get supplier name
+    supplier_name = compliance_response.get("supplier_name", "Unknown Supplier")
+
+    # Determine recommendation text
+    recommendation_text = (
+        "Recommendation Based" if overall_approved else "Not Recommended"
+    )
+
+    # Store supplier data in Supabase database
+    await store_supplier_data_in_supabase(
+        ctx,
+        supplier_name,
+        compliance_response,
+        financial_response,
+        recommendation_text,
+    )
+
     # Build dynamic supplier requirements status
     passed_requirements = []
     failed_requirements = []
@@ -1749,8 +1845,7 @@ async def check_and_send_combined_response(ctx: Context, request_id: str):
             failed_area = failed_requirements[0]
             recommendation_summary = f"The supplier shows strength in {passed_requirements[0]}, but {failed_area} concerns must be mitigated to proceed with partnership."
 
-    # Get supplier name and related data
-    supplier_name = compliance_response.get("supplier_name", "Unknown Supplier")
+    # Get related data
     supplier_country = financial_response.get("supplier_country", "Unknown")
     user_country = financial_response.get("user_country", "United States")
 
