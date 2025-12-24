@@ -1,13 +1,5 @@
 from typing import Optional, Dict, Any, List, TypedDict
 from dotenv import load_dotenv
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.remote.webdriver import WebDriver as RemoteWebDriver
 from langgraph.graph import StateGraph, START, END
 from uagents import Agent, Context, Protocol
 from models.find_supplier import (
@@ -18,8 +10,6 @@ from models.find_supplier import (
 
 import os
 import re
-import time
-import asyncio
 import requests
 import nest_asyncio
 
@@ -42,364 +32,322 @@ class SupplierSearchState(TypedDict):
     request_id: str
     user_query: str
     business_category: str
-    search_category: str
-    search_result: Optional[Dict[str, Any]]
-    best_supplier: Optional[SupplierSearchResult]
+    country: Optional[str]
+    search_query: str
+    suppliers: List[SupplierSearchResult]
     success: bool
     error_message: Optional[str]
     search_summary: str
+    score: int
     ctx: Optional[Context]
 
 
-def extract_country_from_location(location_text: str) -> Optional[str]:
+def detect_country_and_query(message: str) -> tuple[Optional[str], str]:
     """
-    Extract country name from a location string.
-    Example: "Buenos Aires Province, Argentina" -> "Argentina"
+    Detect country from user message and build search query
+
+    Returns:
+        tuple: (country, search_query)
     """
-    if not location_text:
-        return None
+    message_lower = message.lower()
 
-    known_countries = [
-        "Argentina",
-        "Brazil",
-        "Chile",
-        "Colombia",
-        "Mexico",
-        "Peru",
-        "Uruguay",
-        "Venezuela",
-        "Ecuador",
-        "Bolivia",
-        "Paraguay",
-        "United States",
-        "USA",
-        "Canada",
-        "United Kingdom",
-        "UK",
-        "Germany",
-        "France",
-        "Spain",
-        "Italy",
-        "Netherlands",
-        "Belgium",
-        "Switzerland",
-        "Austria",
-        "Portugal",
-        "Sweden",
-        "Norway",
-        "Denmark",
-        "Finland",
-        "Ireland",
-        "Australia",
-        "New Zealand",
-        "Japan",
-        "China",
-        "India",
-        "South Korea",
-        "Singapore",
-        "Taiwan",
-        "Thailand",
-        "Vietnam",
-        "Indonesia",
-        "Malaysia",
-        "Philippines",
-        "South Africa",
-        "Kenya",
-        "Nigeria",
-        "Egypt",
-        "Morocco",
-        "Israel",
-        "United Arab Emirates",
-        "Saudi Arabia",
-    ]
+    # Detect country
+    country = None
+    if any(word in message_lower for word in ["united states", "usa", "us", "america", "american"]):
+        country = "US"
+    elif any(word in message_lower for word in ["uk", "united kingdom", "britain", "british", "england"]):
+        country = "UK"
 
-    location_lower = location_text.lower()
-
-    for country in known_countries:
-        if country.lower() in location_lower:
-            return country
-
-    # If no known country found, try to get the last part after comma
-    parts = location_text.split(",")
-    if len(parts) > 1:
-        potential_country = parts[-1].strip()
-        if len(potential_country) > 2:
-            return potential_country
-
-    return None
+    return country
 
 
-async def search_b_corp_directory(
-    ctx: Context, category: str, max_results: int = 1
-) -> Dict[str, Any]:
-    """
-    Search B Corp directory and extract supplier name + country.
+def parse_input_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 1: Parse user input to extract country"""
+    ctx = state["ctx"]
+    user_query = state["user_query"]
+    business_category = state["business_category"]
 
-    Process:
-    1. Search B Corp directory
-    2. Click on first company profile
-    3. Extract company name and COUNTRY from profile (Headquarters section)
-    4. Country will be sent to financial agent for tariff/inflation analysis
-    """
-    driver = None
+    ctx.logger.info(f"[LangGraph Node: parse_input] Parsing user query: {user_query}")
+
+    country = detect_country_and_query(user_query)
+
+    if not country:
+        ctx.logger.warning("Could not detect country from query")
+        return {
+            **state,
+            "country": None,
+            "success": False,
+            "error_message": "Could not detect country. Please specify 'US' or 'UK' in your query.",
+            "score": 0,
+        }
+
+    # Build search query
+    search_query = f"{business_category} supplier" if business_category != "general" else "supplier"
+
+    ctx.logger.info(f"Detected country: {country}")
+    ctx.logger.info(f"Search query: {search_query}")
+
+    return {
+        **state,
+        "country": country,
+        "search_query": search_query,
+        "score": 100,
+    }
+
+
+def search_uk_suppliers_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 2a: Search UK Companies House API"""
+    ctx = state["ctx"]
+    search_query = state["search_query"]
+
+    ctx.logger.info(f"[LangGraph Node: search_uk] Searching UK Companies House API")
+
+    api_key = os.getenv('GOV_UK_API_KEY', '').strip()
+
+    if not api_key or api_key == "your_api_key_here":
+        return {
+            **state,
+            "success": False,
+            "error_message": "GOV_UK_API_KEY not configured in .env file",
+            "score": 0,
+        }
+
+    base_url = "https://api.company-information.service.gov.uk/search/companies"
+    params = {
+        "q": search_query,
+        "items_per_page": 4  # Get 4 suppliers
+    }
+
     try:
-        ctx.logger.info(f"🔍 Searching B Corp directory for: {category}")
-
-        search_url = f"https://www.bcorporation.net/en-us/find-a-b-corp/?query={category}&sortBy=companies-production-en-us"
-
-        chrome_options = Options()
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument(
-            os.getenv("CHROME_USER_AGENT")
+        response = requests.get(
+            base_url,
+            params=params,
+            auth=(api_key, ''),
+            headers={'Accept': 'application/json'},
+            timeout=10
         )
 
-        # Use Remote Selenium if SELENIUM_REMOTE_URL is set (Docker), else local Chrome
-        selenium_url = os.getenv("SELENIUM_REMOTE_URL")
-        if selenium_url:
-            ctx.logger.info(f"Using remote Selenium at: {selenium_url}")
-            driver = webdriver.Remote(
-                command_executor=selenium_url, options=chrome_options
-            )
-        else:
-            driver = webdriver.Chrome(options=chrome_options)
-        driver.set_page_load_timeout(60)
-        driver.get(search_url)
-        time.sleep(8)
-
-        first_company = None
-        company_country = None
-        profile_url = None
-
-        # Try to find and click first company profile
-        try:
-            # Use WebDriverWait for better control
-            wait = WebDriverWait(driver, 15)
-
-            company_links = driver.find_elements(
-                By.CSS_SELECTOR, 'a[href*="/find-a-b-corp/company/"]'
-            )
-
-            if company_links:
-                profile_url = company_links[0].get_attribute("href")
-                ctx.logger.info(f"📍 Found company profile: {profile_url}")
-                driver.get(profile_url)
-                time.sleep(5)
-                ctx.logger.info("🌐 Loaded company profile page")
-        except Exception as e:
-            ctx.logger.warning(f"Could not navigate to profile: {e}")
-            # Check if driver is still responsive (works for both local and remote WebDriver)
-            try:
-                if driver:
-                    _ = driver.current_url  # Quick responsiveness check
-                else:
-                    ctx.logger.error("Driver is None, stopping")
-                    raise
-            except Exception:
-                ctx.logger.error("Driver not responsive, stopping")
-                raise
-
-        html_content = driver.page_source
-        soup = BeautifulSoup(html_content, "html.parser")
-
-        # Extract company name
-        h1_tag = soup.find("h1")
-        if h1_tag:
-            potential_name = h1_tag.get_text(strip=True)
-            if potential_name and len(potential_name) > 2 and len(potential_name) < 100:
-                first_company = potential_name
-                ctx.logger.info(f"Found company name: {first_company}")
-
-        if not first_company:
-            company_span = soup.find("span", {"data-testid": "company-name-desktop"})
-            if company_span:
-                first_company = company_span.get_text(strip=True)
-
-        if not first_company:
-            company_span = soup.find("span", {"data-testid": "company-name-mobile"})
-            if company_span:
-                first_company = company_span.get_text(strip=True)
-
-        if not first_company:
-            pattern = r'data-testid="company-name[^"]*"[^>]*>([^<]+)</span>'
-            matches = re.findall(pattern, html_content, re.IGNORECASE)
-            if matches:
-                first_company = matches[0].strip()
-
-        if not first_company:
-            ctx.logger.warning("Could not extract company name")
+        if response.status_code == 401:
             return {
+                **state,
                 "success": False,
-                "results": [],
-                "total_found": 0,
-                "search_url": search_url,
-                "error": "No company found",
+                "error_message": "Invalid UK API key. Please get a valid key from https://developer.company-information.service.gov.uk/",
+                "score": 0,
             }
 
-        ctx.logger.info(f"✅ Supplier: {first_company}")
+        response.raise_for_status()
+        data = response.json()
+        companies = data.get("items", [])
 
-        result = SupplierSearchResult(
-            company_name=first_company,
-            location="",  # Location will be scraped by individual agents if needed
-            industry=category.title(),
-            b_corp_profile_url=profile_url or search_url,
-            description=f"B Corporation certified company specializing in {category}",
-        )
+        suppliers = []
+        for company in companies[:4]:
+            address = company.get("address", {})
+            address_parts = [
+                address.get("address_line_1", ""),
+                address.get("address_line_2", ""),
+                address.get("locality", ""),
+                address.get("postal_code", "")
+            ]
+            formatted_address = ", ".join(filter(None, address_parts))
+
+            suppliers.append(SupplierSearchResult(
+                company_name=company.get("title", "Unknown"),
+                company_number=company.get("company_number", ""),
+                status=company.get("company_status", ""),
+                company_type=company.get("company_type", ""),
+                address=formatted_address,
+                country="UK",
+                industry=state["business_category"],
+                description=f"UK registered company in {state['business_category']} industry"
+            ))
+
+        score = 100 if len(suppliers) >= 3 else 75
+
+        ctx.logger.info(f"✅ Found {len(suppliers)} UK suppliers")
 
         return {
+            **state,
+            "suppliers": suppliers,
             "success": True,
-            "results": [result],
-            "total_found": 1,
-            "search_url": search_url,
+            "score": score,
+            "search_summary": f"Found {len(suppliers)} UK suppliers in {state['business_category']} category",
         }
 
     except Exception as e:
-        ctx.logger.error(f"Error during search: {e}")
-        import traceback
-
-        traceback.print_exc()
-
-        return {"success": False, "results": [], "total_found": 0, "error": str(e)}
-
-    finally:
-        # Always cleanup driver in finally block
-        if driver:
-            try:
-                driver.quit()
-                ctx.logger.info("B Corp search WebDriver cleaned up")
-            except Exception as e:
-                ctx.logger.warning(f"Error closing driver: {e}")
-
-
-def find_supplier_node(state: SupplierSearchState) -> SupplierSearchState:
-    """Node 1: Find supplier by searching B Corp directory"""
-    ctx = state["ctx"]
-    search_category = state["search_category"]
-
-    ctx.logger.info(f"[LangGraph Node: find_supplier] Searching for: {search_category}")
-
-    search_result = asyncio.run(
-        search_b_corp_directory(ctx, search_category, max_results=1)
-    )
-
-    ctx.logger.info(f"Search result: {search_result}")
-
-    if not search_result.get("success"):
+        ctx.logger.error(f"Error searching UK suppliers: {e}")
         return {
             **state,
             "success": False,
-            "error_message": search_result.get("error", "Unknown error occurred"),
-            "search_summary": "Failed to search B Corporation directory",
+            "error_message": f"Error searching UK suppliers: {str(e)}",
+            "score": 0,
         }
 
-    return {
-        **state,
-        "search_result": search_result,
-        "success": search_result.get("success", False),
-    }
 
-
-def process_results_node(state: SupplierSearchState) -> SupplierSearchState:
-    """Node 2: Process search results and select best supplier"""
+def search_us_suppliers_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 2b: Search US SEC API"""
     ctx = state["ctx"]
-    search_result = state["search_result"]
+    business_category = state["business_category"]
 
-    ctx.logger.info("[LangGraph Node: process_results] Processing search results")
+    ctx.logger.info(f"[LangGraph Node: search_us] Searching US SEC API")
 
-    if not search_result or not search_result.get("success"):
-        error_msg = (
-            search_result.get("error", "Unknown error occurred")
-            if search_result
-            else "Search failed"
-        )
+    try:
+        # Get SEC company tickers
+        tickers_url = "https://www.sec.gov/files/company_tickers.json"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            'Accept': 'application/json'
+        }
+
+        response = requests.get(tickers_url, headers=headers, timeout=10)
+        response.raise_for_status()
+
+        companies_data = response.json()
+
+        # Search for companies matching the business category
+        search_term = business_category.lower() if business_category != "general" else "supplier"
+
+        matching_companies = []
+        for key, company in companies_data.items():
+            company_name = company.get("title", "").lower()
+            if search_term in company_name or "supplier" in company_name or business_category.lower() in company_name:
+                matching_companies.append(SupplierSearchResult(
+                    company_name=company.get("title", "Unknown"),
+                    ticker=company.get("ticker", ""),
+                    cik=str(company.get("cik_str", "")).zfill(10),
+                    country="US",
+                    industry=state["business_category"],
+                    description=f"US registered company in {state['business_category']} industry"
+                ))
+
+                if len(matching_companies) >= 4:
+                    break
+
+        score = 100 if len(matching_companies) >= 3 else 75
+
+        ctx.logger.info(f"✅ Found {len(matching_companies)} US suppliers")
+
+        return {
+            **state,
+            "suppliers": matching_companies,
+            "success": True,
+            "score": score,
+            "search_summary": f"Found {len(matching_companies)} US suppliers in {state['business_category']} category",
+        }
+
+    except Exception as e:
+        ctx.logger.error(f"Error searching US suppliers: {e}")
         return {
             **state,
             "success": False,
-            "error_message": error_msg,
-            "search_summary": "Failed to search B Corporation directory",
+            "error_message": f"Error searching US suppliers: {str(e)}",
+            "score": 0,
         }
 
-    results = search_result.get("results", [])
 
-    if not results:
+def format_results_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 3: Format results for output"""
+    ctx = state["ctx"]
+    suppliers = state["suppliers"]
+
+    ctx.logger.info(f"[LangGraph Node: format_results] Formatting {len(suppliers)} suppliers")
+
+    if not suppliers:
         return {
             **state,
             "success": False,
-            "error_message": f"No suppliers found in category: {state['search_category']}",
-            "search_summary": f"No B Corporation certified companies found for '{state['search_category']}'",
+            "error_message": f"No suppliers found in {state['country']} for category: {state['business_category']}",
         }
 
-    best_supplier = select_best_supplier(ctx, results, state["user_query"])
-    search_summary = f"Found B Corporation certified company in the {state['search_category']} category: {best_supplier.company_name}"
-
-    return {
-        **state,
-        "best_supplier": best_supplier,
-        "success": True,
-        "search_summary": search_summary,
-    }
-
-
-def supplier_found_node(state: SupplierSearchState) -> SupplierSearchState:
-    """Node 3: Handle successful supplier found"""
-    ctx = state["ctx"]
-    best_supplier = state["best_supplier"]
-
-    ctx.logger.info(
-        f"[LangGraph Node: supplier_found] ✓ Supplier found: {best_supplier.company_name}"
-    )
-    ctx.logger.info(f"  Location: {best_supplier.location}")
-    ctx.logger.info(f"  Industry: {best_supplier.industry}")
-    ctx.logger.info(f"  Summary: {state['search_summary']}")
+    # Log supplier details
+    for idx, supplier in enumerate(suppliers, 1):
+        ctx.logger.info(f"  {idx}. {supplier.company_name} ({supplier.country})")
 
     return state
 
 
-def supplier_not_found_node(state: SupplierSearchState) -> SupplierSearchState:
-    """Node 4: Handle supplier not found"""
+def error_node(state: SupplierSearchState) -> SupplierSearchState:
+    """Node 4: Handle errors"""
     ctx = state["ctx"]
 
-    ctx.logger.warning(f"[LangGraph Node: supplier_not_found] ✗ Supplier not found")
-    ctx.logger.warning(f"  Category: {state['search_category']}")
-    ctx.logger.warning(f"  Error: {state.get('error_message', 'No results')}")
+    ctx.logger.error(f"[LangGraph Node: error] {state.get('error_message', 'Unknown error')}")
 
     return state
 
 
-def route_search_results(state: SupplierSearchState) -> str:
-    """Conditional routing: supplier found or not found"""
-    if state.get("success") and state.get("best_supplier"):
-        return "supplier_found"
+def route_by_country(state: SupplierSearchState) -> str:
+    """Route to appropriate API based on country"""
+    # Check for errors
+    if state.get("error_message") or state.get("score", 0) < 75:
+        return "error"
+
+    country = state.get("country")
+
+    if country == "US":
+        return "search_us"
+    elif country == "UK":
+        return "search_uk"
     else:
-        return "supplier_not_found"
+        return "error"
+
+
+def should_continue_to_format(state: SupplierSearchState) -> str:
+    """Determine if we should format output or handle error"""
+    if state.get("error_message") or state.get("score", 0) < 75:
+        return "error"
+
+    if state.get("suppliers") and len(state["suppliers"]) > 0:
+        return "format_results"
+
+    return "error"
 
 
 def build_supplier_search_graph():
-    """Build the LangGraph workflow for supplier search"""
+    """Build the LangGraph workflow for multi-country supplier search"""
     workflow = StateGraph(SupplierSearchState)
 
-    workflow.add_node("find_supplier", find_supplier_node)
-    workflow.add_node("process_results", process_results_node)
-    workflow.add_node("supplier_found", supplier_found_node)
-    workflow.add_node("supplier_not_found", supplier_not_found_node)
+    # Add nodes
+    workflow.add_node("parse_input", parse_input_node)
+    workflow.add_node("search_us", search_us_suppliers_node)
+    workflow.add_node("search_uk", search_uk_suppliers_node)
+    workflow.add_node("format_results", format_results_node)
+    workflow.add_node("error", error_node)
 
-    workflow.add_edge(START, "find_supplier")
-    workflow.add_edge("find_supplier", "process_results")
+    # Add edges
+    workflow.add_edge(START, "parse_input")
 
+    # Conditional routing based on country
     workflow.add_conditional_edges(
-        "process_results",
-        route_search_results,
+        "parse_input",
+        route_by_country,
         {
-            "supplier_found": "supplier_found",
-            "supplier_not_found": "supplier_not_found",
+            "search_us": "search_us",
+            "search_uk": "search_uk",
+            "error": "error",
         },
     )
 
-    workflow.add_edge("supplier_found", END)
-    workflow.add_edge("supplier_not_found", END)
+    # After searching, check if we should continue or end
+    workflow.add_conditional_edges(
+        "search_us",
+        should_continue_to_format,
+        {
+            "format_results": "format_results",
+            "error": "error",
+        },
+    )
+
+    workflow.add_conditional_edges(
+        "search_uk",
+        should_continue_to_format,
+        {
+            "format_results": "format_results",
+            "error": "error",
+        },
+    )
+
+    # End after formatting or error
+    workflow.add_edge("format_results", END)
+    workflow.add_edge("error", END)
 
     return workflow.compile()
 
@@ -411,14 +359,15 @@ supplier_search_graph = build_supplier_search_graph()
 async def startup(ctx: Context):
     """Initialize find_supplier agent on startup"""
     ctx.logger.info("=" * 70)
-    ctx.logger.info("FIND SUPPLIER AGENT STARTING UP")
+    ctx.logger.info("FIND SUPPLIER AGENT STARTING UP (MULTI-COUNTRY)")
     ctx.logger.info("=" * 70)
     ctx.logger.info(f"Agent Name: {ctx.agent.name}")
     ctx.logger.info(f"Agent Address: {ctx.agent.address}")
     ctx.logger.info(f"Port: 8006")
+    ctx.logger.info("Supported Countries: US (SEC API), UK (Companies House API)")
     ctx.logger.info("=" * 70)
 
-    # Initialize storage for tracking searches
+    # Initialize storage
     ctx.storage.set("search_history", [])
     ctx.storage.set("processed_request_ids", [])
 
@@ -439,38 +388,15 @@ async def shutdown(ctx: Context):
 
 
 def extract_business_category(user_query: str) -> str:
+    """Extract business category from user query"""
     user_query_lower = user_query.lower()
 
     categories = [
-        "water",
-        "coffee",
-        "tea",
-        "food",
-        "restaurant",
-        "pizza",
-        "burger",
-        "cafe",
-        "clothing",
-        "apparel",
-        "fashion",
-        "textile",
-        "bakery",
-        "chocolate",
-        "beer",
-        "wine",
-        "beverage",
-        "furniture",
-        "design",
-        "manufacturing",
-        "technology",
-        "software",
-        "consulting",
-        "cosmetics",
-        "beauty",
-        "wellness",
-        "agriculture",
-        "farming",
-        "organic",
+        "coffee", "tea", "food", "restaurant", "pizza", "burger", "cafe",
+        "clothing", "apparel", "fashion", "textile", "bakery", "chocolate",
+        "beer", "wine", "beverage", "furniture", "design", "manufacturing",
+        "technology", "software", "consulting", "cosmetics", "beauty",
+        "wellness", "agriculture", "farming", "organic", "water"
     ]
 
     for category in categories:
@@ -480,39 +406,14 @@ def extract_business_category(user_query: str) -> str:
     words = re.findall(r"\b[a-z]+\b", user_query_lower)
     if len(words) > 2:
         skip_words = {
-            "i",
-            "need",
-            "want",
-            "find",
-            "looking",
-            "for",
-            "a",
-            "an",
-            "the",
-            "some",
-            "get",
-            "me",
+            "i", "need", "want", "find", "looking", "for", "a", "an",
+            "the", "some", "get", "me", "in", "from", "us", "uk"
         }
         for word in words:
             if word not in skip_words and len(word) > 3:
                 return word
 
     return "general"
-
-
-# was async, changed to sync
-
-
-def select_best_supplier(
-    ctx: Context, results: List[SupplierSearchResult], user_query: str
-) -> Optional[SupplierSearchResult]:
-    if not results:
-        return None
-
-    best_supplier = results[0]
-    ctx.logger.info(f"Selected supplier: {best_supplier.company_name}")
-
-    return best_supplier
 
 
 @find_supplier_protocol.on_message(
@@ -531,7 +432,7 @@ async def handle_find_supplier_request(
     ctx.logger.info(f"Business Category: {msg.business_category}")
     ctx.logger.info("=" * 70)
     ctx.logger.info("")
-    ctx.logger.info("🔍 Starting LangGraph Supplier Search Workflow...")
+    ctx.logger.info("🔍 Starting LangGraph Multi-Country Supplier Search...")
     ctx.logger.info("=" * 70)
 
     try:
@@ -552,50 +453,51 @@ async def handle_find_supplier_request(
         initial_state: SupplierSearchState = {
             "request_id": msg.request_id,
             "user_query": msg.user_query,
-            "business_category": msg.business_category,
-            "search_category": search_category,
-            "search_result": None,
-            "best_supplier": None,
+            "business_category": search_category,
+            "country": None,
+            "search_query": "",
+            "suppliers": [],
             "success": False,
             "error_message": None,
             "search_summary": "",
+            "score": 100,
             "ctx": ctx,
         }
 
-        ctx.logger.info(
-            f"🔄 Executing LangGraph workflow for category: {search_category}"
-        )
-        ctx.logger.info(f"Will search B Corp directory...")
+        ctx.logger.info(f"🔄 Executing LangGraph workflow for category: {search_category}")
 
         final_state = supplier_search_graph.invoke(initial_state)
 
         ctx.logger.info("LangGraph Workflow Completed")
-  
-        if final_state["success"] and final_state["best_supplier"]:
-            best_supplier = final_state["best_supplier"]
 
-            ctx.logger.info("✅ Supplier Found Successfully!")
-            ctx.logger.info(f"Company Name: {best_supplier.company_name}")
-            ctx.logger.info(f"Location: {best_supplier.location}")
-            ctx.logger.info(f"Industry: {best_supplier.industry}")
-            ctx.logger.info(f"B Corp Profile: {best_supplier.b_corp_profile_url}")
+        if final_state["success"] and final_state["suppliers"]:
+            suppliers = final_state["suppliers"]
+            country = final_state["country"]
+
+            ctx.logger.info(f"✅ Found {len(suppliers)} Suppliers in {country}!")
+            for idx, supplier in enumerate(suppliers, 1):
+                ctx.logger.info(f"  {idx}. {supplier.company_name}")
 
             response = FindSupplierResponse(
                 request_id=msg.request_id,
                 success=True,
-                best_supplier=best_supplier,
-                alternative_suppliers=[],
+                suppliers=suppliers,
+                country=country,
                 search_category=search_category,
-                total_results_found=1,
+                total_results_found=len(suppliers),
                 search_summary=final_state["search_summary"],
+                # Legacy fields for backwards compatibility
+                best_supplier=suppliers[0] if suppliers else None,
+                alternative_suppliers=suppliers[1:] if len(suppliers) > 1 else [],
             )
 
             search_history = ctx.storage.get("search_history") or []
             search_history.append(
                 {
                     "request_id": msg.request_id,
+                    "country": country,
                     "category": search_category,
-                    "selected_supplier": best_supplier.company_name,
+                    "suppliers_found": len(suppliers),
                 }
             )
             ctx.storage.set("search_history", search_history)
@@ -603,11 +505,11 @@ async def handle_find_supplier_request(
             ctx.logger.info(f"To: {sender}")
             ctx.logger.info(f"Request ID: {msg.request_id}")
             ctx.logger.info(f"Success: True")
-            ctx.logger.info(f"Supplier: {best_supplier.company_name}")
+            ctx.logger.info(f"Suppliers: {len(suppliers)}")
 
             await ctx.send(sender, response)
         else:
-            ctx.logger.warning("No supplier found")
+            ctx.logger.warning("No suppliers found")
             ctx.logger.warning(
                 f"Error: {final_state.get('error_message', 'No suppliers found')}"
             )
@@ -615,9 +517,10 @@ async def handle_find_supplier_request(
             error_response = FindSupplierResponse(
                 request_id=msg.request_id,
                 success=False,
+                country=final_state.get("country", ""),
                 search_category=search_category,
                 total_results_found=0,
-                search_summary=final_state.get("search_summary", "Supplier not found"),
+                search_summary=final_state.get("search_summary", "Suppliers not found"),
                 error_message=final_state.get("error_message", "No suppliers found"),
             )
 

@@ -3,33 +3,47 @@ from typing import Optional, List
 
 
 class FindSupplierRequest(Model):
-    """Request to find a supplier from B Corporation directory"""
+    """Request to find suppliers from UK Companies House or US SEC API"""
 
     request_id: str
     user_query: str
     business_category: str
+    country: str = ""  # US or UK
     timestamp: str = ""
 
 
 class SupplierSearchResult(Model):
-    """Individual supplier search result from B Corp directory"""
+    """Individual supplier search result"""
 
     company_name: str
     location: str = ""
     industry: str = ""
+    country: str = ""
+    # UK-specific fields
+    company_number: str = ""
+    status: str = ""
+    company_type: str = ""
+    address: str = ""
+    # US-specific fields
+    ticker: str = ""
+    cik: str = ""
+    # Legacy field for backwards compatibility
     b_corp_profile_url: str = ""
     description: str = ""
 
 
 class FindSupplierResponse(Model):
-    """Response with the best supplier found from B Corp directory"""
+    """Response with suppliers found from UK or US APIs"""
 
     request_id: str
     success: bool
-    best_supplier: Optional[SupplierSearchResult] = None
-    alternative_suppliers: List[SupplierSearchResult] = []
+    suppliers: List[SupplierSearchResult] = []
+    country: str = ""
     search_category: str = ""
     total_results_found: int = 0
     search_summary: str = ""
     error_message: str = ""
     timestamp: str = ""
+    # Legacy fields for backwards compatibility
+    best_supplier: Optional[SupplierSearchResult] = None
+    alternative_suppliers: List[SupplierSearchResult] = []
