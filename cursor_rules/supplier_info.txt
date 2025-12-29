@@ -1,0 +1,25 @@
+For an american supplier(lets say we are using the american version of this)
+We want to go on  this url and we gfet thge CIK from the supplier we want to look into for more detail
+# This is how it would lookk like https://www.sec.gov/edgar/browse/?CIK=2068577&owner=exclude
+# For the one we want to select we can choose then choose a documjent to look at, we can simulate clicking on it use selium and the latest filling we want ot choose is 20-F for foreign comapnies
+But if the company is United STates  then click on thge 10-Q documents
+# For the one we want to select we can choose theh CIKL: 
+
+
+# This agent will grab info  abotu the general symptosis of the company
+
+
+4.A.
+
+ History and Development of the Company
+
+In June 2017, we incorporated Lucky Coffee Inc. under the laws of the Cayman Islands as our offshore holding company, which later changed its name to Luckin Coffee Inc. in September 2017. We are known as Luckin Coffee. In June 2017, we incorporated Lucky Coffee Inc. under the laws of the British Virgin Islands as Luckin Coffee Inc.’s wholly owned subsidiary and our intermediate holding company to facilitate financing, which later changed its name to Luckin Coffee Investment Inc. in December 2017.
+
+Lucky Coffee (China) Limited was incorporated in June 2017 as Luckin Coffee Investment Inc.’s wholly owned subsidiary in Hong Kong, which changed its name to Luckin Coffee (Hong Kong) Limited in October 2018, or Hong Kong Luckin. In April 2019, Luckin Coffee Investment Inc. incorporated another two wholly owned subsidiaries, Luckin Coffee Roasting (Hong Kong) Limited and Luckin Coffee Roastery (Hong Kong) Limited, in Hong Kong.
+
+In October 2017, December 2017 and March 2018, Hong Kong Luckin incorporated Beijing Luckin Coffee Co., Ltd., or Beijing WFOE, Luckin Investment (Tianjin) Co., Ltd. and Luckin Group, as its wholly owned subsidiaries in the PRC successively and began to operate coffee retail business. See “—4.C. Organizational Structure.”
+
+In July 2018 and September 2018, Beijing WFOE entered into a series of contractual arrangements with the Former VIE established in June 2017 and its shareholders, which enabled us to obtain control over the Former VIE through Beijing WFOE. Such contractual arrangements consist of proxy agreement and power of attorney, confirmation and guarantee letters, spousal consent letter, share pledge agreement, master exclusive service agreement, business cooperation agreement and exclusive option agreement. See “—4.C. Organizational Structure—Former Contractual Arrangements with the Former VIE and Its Nominee Shareholders.”
+
+Luckin Coffee Inc. issued one Ordinary Share in June 2017 and issued one Ordinary Share in August 2017. In March 2018, Luckin Coffee Inc. increased Ordinary Shares to 750 shares and effected a share split, pursuant to which, the 750 Ordinary Shares were subdivided into 750,000 Ordinary Shares. After that, Luckin Coffee Inc. (i) issued 915,750 angel-1 shares, 513,000 angel-2 shares and 544,688 Series A convertible redeemable preferred shares in June 2018; (ii) issued 272,343 Series B convertible redeemable preferred shares in November 2018; (iii) issued 6,809 Series B convertible redeemable preferred shares in January 2019; and (iv) issued 188,393 Series B-1 convertible redeemable preferred shares in April 2019, to certain investors.
+
