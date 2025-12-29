@@ -1,6 +1,7 @@
 from uagents import Model
 from typing import Optional, List
-
+from uagents import Context
+from typing_extensions import TypedDict
 
 class FindSupplierRequest(Model):
     """Request to find suppliers from UK Companies House or US SEC API"""
@@ -47,3 +48,19 @@ class FindSupplierResponse(Model):
     # Legacy fields for backwards compatibility
     best_supplier: Optional[SupplierSearchResult] = None
     alternative_suppliers: List[SupplierSearchResult] = []
+
+
+class SupplierSearchState(TypedDict):
+    """State for LangGraph workflow"""
+
+    request_id: str
+    user_query: str
+    business_category: str
+    country: Optional[str]
+    search_query: str
+    suppliers: List[SupplierSearchResult]
+    success: bool
+    error_message: Optional[str]
+    search_summary: str
+    score: int
+    ctx: Optional[Context]
