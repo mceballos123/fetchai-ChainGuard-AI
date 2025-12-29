@@ -456,5 +456,146 @@ def main():
         traceback.print_exc()
 
 
+# ========== Test Functions ==========
+
+def test_us_api():
+    """
+    Test the US SEC API search functionality
+    """
+    print("\n" + "="*80)
+    print("Testing US SEC API")
+    print("="*80)
+
+    test_state = {
+        "user_message": "Find coffee suppliers in the US",
+        "country": "US",
+        "establishment_type": "coffee",
+        "search_query": "coffee supplier",
+        "suppliers": [],
+        "error": None,
+        "score": 100
+    }
+
+    print(f"Test query: {test_state['search_query']}")
+    print("Searching US SEC database...")
+
+    result = search_us_suppliers(test_state)
+
+    if result.get("error"):
+        print(f"❌ Error: {result['error']}")
+        return False
+
+    suppliers = result.get("suppliers", [])
+    print(f"✓ Found {len(suppliers)} US suppliers")
+
+    for idx, supplier in enumerate(suppliers, 1):
+        print(f"\n{idx}. {supplier.get('name')}")
+        print(f"   Ticker: {supplier.get('ticker', 'N/A')}")
+        print(f"   CIK: {supplier.get('cik', 'N/A')}")
+        print(f"   Country: {supplier.get('country')}")
+
+    print("\n" + "="*80)
+    return len(suppliers) > 0
+
+
+def test_uk_api():
+    """
+    Test the UK Companies House API search functionality
+    """
+    print("\n" + "="*80)
+    print("Testing UK Companies House API")
+    print("="*80)
+
+    test_state = {
+        "user_message": "Find coffee suppliers in the UK",
+        "country": "UK",
+        "establishment_type": "coffee",
+        "search_query": "coffee supplier",
+        "suppliers": [],
+        "error": None,
+        "score": 100
+    }
+
+    print(f"Test query: {test_state['search_query']}")
+    print("Searching UK Companies House database...")
+
+    result = search_uk_suppliers(test_state)
+
+    if result.get("error"):
+        print(f"❌ Error: {result['error']}")
+        return False
+
+    suppliers = result.get("suppliers", [])
+    print(f"✓ Found {len(suppliers)} UK suppliers")
+
+    for idx, supplier in enumerate(suppliers, 1):
+        print(f"\n{idx}. {supplier.get('name')}")
+        print(f"   Company Number: {supplier.get('company_number', 'N/A')}")
+        print(f"   Status: {supplier.get('status', 'N/A')}")
+        print(f"   Address: {supplier.get('address', 'N/A')}")
+        print(f"   Country: {supplier.get('country')}")
+
+    print("\n" + "="*80)
+    return len(suppliers) > 0
+
+
+def test_country_detection():
+    """
+    Test the country detection logic
+    """
+    print("\n" + "="*80)
+    print("Testing Country Detection")
+    print("="*80)
+
+    test_cases = [
+        ("Find coffee suppliers in the US", "US", "coffee"),
+        ("I need coffee suppliers in the UK", "UK", "coffee"),
+        ("Looking for restaurant suppliers in America", "US", "restaurant"),
+        ("Find automobile suppliers in Britain", "UK", "automobile"),
+    ]
+
+    for message, expected_country, expected_type in test_cases:
+        country, est_type, query = detect_country_and_query(message)
+        status = "✓" if country == expected_country else "❌"
+        print(f"{status} '{message}'")
+        print(f"   Detected: Country={country}, Type={est_type}, Query={query}")
+        print(f"   Expected: Country={expected_country}, Type={expected_type}")
+        print()
+
+    print("="*80)
+
+
+def run_tests():
+    """
+    Run all test cases
+    """
+    print("\n" + "="*80)
+    print("Running Test Suite")
+    print("="*80)
+
+    # Test country detection
+    test_country_detection()
+
+    # Test US API
+    us_success = test_us_api()
+
+    # Test UK API
+    uk_success = test_uk_api()
+
+    # Summary
+    print("\n" + "="*80)
+    print("Test Summary")
+    print("="*80)
+    print(f"US API Test: {'✓ PASSED' if us_success else '❌ FAILED'}")
+    print(f"UK API Test: {'✓ PASSED' if uk_success else '❌ FAILED'}")
+    print("="*80)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+
+    # Check if running in test mode
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        run_tests()
+    else:
+        main()

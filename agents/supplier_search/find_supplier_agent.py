@@ -6,12 +6,13 @@ from models.find_supplier import (
     FindSupplierRequest,
     FindSupplierResponse,
     SupplierSearchResult,
+    SupplierSearchState,
 )
-
 import os
 import re
 import requests
 import nest_asyncio
+import time
 
 nest_asyncio.apply()
 load_dotenv()
@@ -26,29 +27,8 @@ find_supplier_agent = Agent(
 find_supplier_protocol = Protocol(name="find_supplier_protocol", version="1.0")
 
 
-class SupplierSearchState(TypedDict):
-    """State for LangGraph workflow"""
-
-    request_id: str
-    user_query: str
-    business_category: str
-    country: Optional[str]
-    search_query: str
-    suppliers: List[SupplierSearchResult]
-    success: bool
-    error_message: Optional[str]
-    search_summary: str
-    score: int
-    ctx: Optional[Context]
-
-
 def detect_country_and_query(message: str) -> tuple[Optional[str], str]:
-    """
-    Detect country from user message and build search query
-
-    Returns:
-        tuple: (country, search_query)
-    """
+    
     message_lower = message.lower()
 
     # Detect country
@@ -96,21 +76,13 @@ def parse_input_node(state: SupplierSearchState) -> SupplierSearchState:
 
 
 def search_uk_suppliers_node(state: SupplierSearchState) -> SupplierSearchState:
-    """Node 2a: Search UK Companies House API"""
+    
     ctx = state["ctx"]
     search_query = state["search_query"]
 
     ctx.logger.info(f"[LangGraph Node: search_uk] Searching UK Companies House API")
 
-    api_key = os.getenv('GOV_UK_API_KEY', '').strip()
-
-    if not api_key or api_key == "your_api_key_here":
-        return {
-            **state,
-            "success": False,
-            "error_message": "GOV_UK_API_KEY not configured in .env file",
-            "score": 0,
-        }
+    api_key = os.getenv('GOV_UK_API_KEY').strip()
 
     base_url = "https://api.company-information.service.gov.uk/search/companies"
     params = {
@@ -119,6 +91,11 @@ def search_uk_suppliers_node(state: SupplierSearchState) -> SupplierSearchState:
     }
 
     try:
+        # Add 10-second delay before making API call
+        ctx.logger.info("Waiting 10 seconds before calling UK API...")
+        time.sleep(10)
+        ctx.logger.info("Making UK API request now...")
+
         response = requests.get(
             base_url,
             params=params,
@@ -197,6 +174,11 @@ def search_us_suppliers_node(state: SupplierSearchState) -> SupplierSearchState:
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
             'Accept': 'application/json'
         }
+
+        # Add 10-second delay before making API call
+        ctx.logger.info("Waiting 10 seconds before calling US SEC API...")
+        time.sleep(10)
+        ctx.logger.info("Making US SEC API request now...")
 
         response = requests.get(tickers_url, headers=headers, timeout=10)
         response.raise_for_status()
@@ -326,7 +308,6 @@ def build_supplier_search_graph():
         },
     )
 
-    # After searching, check if we should continue or end
     workflow.add_conditional_edges(
         "search_us",
         should_continue_to_format,
