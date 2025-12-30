@@ -1,0 +1,45 @@
+For an american supplier(lets say we are using the american version of this)
+We want to go on  this url and we gfet thge CIK from the supplier we want to look into for more detail
+# This is how it would lookk like https://www.sec.gov/edgar/browse/?CIK=2068577&owner=exclude
+# For the one we want to select we can choose then choose a documjent to look at, we can simulate clicking on it use selium and the latest filling we want ot choose is 20-F for foreign comapnies
+But if the company is United STates  then click on thge 10-Q documents
+# For the one we want to select we can choose theh CIKL: 
+
+Use key words like risk factors, risk,
+
+
+10-Q
+SUMMARY RISK FACTORS
+Investing in our Class A common stock involves a high degree of risk because our business is subject to numerous risks and uncertainties, including those described in Part II, Item 1A. Risk Factors. You should carefully consider these risks and uncertainties when investing in our Class A common stock. The principal risks and uncertainties affecting our business include the following:
+•We have a history of losses and, especially if we continue to grow at an accelerated rate, we may not achieve or maintain profitability in the future.
+•Food safety and quality concerns may negatively impact our brand, business and results of operations.
+•Evolving consumer preferences and tastes, including public or medical opinions about caffeine and sugar consumption, or changes in consumer spending may adversely affect our business.
+•We may not be able to compete successfully with other coffee stores, quick service restaurants and convenience stores, including the growing number of coffee delivery options.
+•We may be unsuccessful in opening new stores or establishing new markets, which could adversely affect our growth.
+•New stores, once opened, may not be profitable or may close, and the increases in average per store sales and comparable sales that we have experienced in the past may not be indicative of future results.
+•Our marketing programs may not be successful, and our new menu items and advertising campaigns may not generate increased sales or profits, resulting in harm to our financial results.
+•Interruption of our supply chain of coffee beans, food products, flavored syrups, dairy products, plant-based dairy-free alternative products or other ingredients, coffee machines and other restaurant equipment or packaging could affect our ability to produce or deliver our products.
+•We have a limited number of suppliers, distributors and manufacturers for many of our frequently used ingredients, supplies and products. If our suppliers, distributors or manufacturers are unable to fulfill their obligations under our arrangements with them, we could encounter supply shortages and incur higher costs or fail to meet our sales demands or quality standards.
+•Tariffs on certain imports to the United States and other potential changes to U.S. trade policy could have a material adverse effect on our business, results of operations, prospects and financial condition.
+•Increases or sustained inflation in the cost of high-quality arabica coffee beans, dairy or other commodities or decreases in the availability of high-quality arabica coffee beans, dairy or other commodities could have an adverse impact on our business and financial results.
+•Our stores are geographically concentrated in the Western United States and Texas, and we could be negatively affected by conditions specific to those regions.
+•Our brand is core to our success, and damage to our brand or reputation and negative publicity could negatively impact our business, financial condition and results of operations.
+•If we fail to offer high-quality guest experience, our business and reputation will suffer.
+•We believe our culture has contributed to our success, and if we cannot maintain this culture as we grow, we could lose employee engagement, which could harm our business and reputation.
+
+
+20-F
+
+Risk Factors
+
+Risks Relating to the Fabricated Transactions, Internal Investigation, Internal Control, Offshore Restructuring and Related Matters
+
+The Fabricated Transactions (defined below) first disclosed in 2020 have exposed us to a number of legal proceedings, investigations and inquiries, resulted in significant legal and other expenses, and required significant time and attention from our senior management, among other adverse impacts.
+
+In March 2020, our board of directors (the “Board”) formed a special committee (the “Special Committee”) to oversee an internal investigation (the “Internal Investigation”) into certain issues raised to the Board’s attention during the audit of our consolidated financial statements for the fiscal year ended December 31, 2019. In April 2020, the Special Committee brought to the Board’s attention that certain management and employees reporting to them had engaged in misconduct, including fabricating certain transactions. On July 1, 2020, we announced that the Special Committee had substantially completed the Internal Investigation and found that the fabrication of transactions by certain management and employees reporting to them (the “Fabricated Transactions”) began in April 2019 and that, as a result, our net revenue in 2019 was inflated by approximately RMB2.12 billion (US$0.31 billion), and our costs and expenses were inflated by approximately RMB1.34 billion (US$0.2 billion).
+
+The Fabricated Transactions had and could continue to have material adverse impacts on us. We were or are the subject of a number of legal proceedings, investigations and inquiries with respect to the Fabricated Transactions and have been named as a defendant in a number of lawsuits, including class action lawsuits. We incurred significant costs in connection with the Internal Investigation, including legal expenses and costs associated with the restatement and adjustment of our financial statements for the second and third quarters in 2019. We may also incur material costs associated with our indemnification arrangements with our current and former directors and certain of our officers, as well as other indemnitees.
+
+Moreover, an unfavorable outcome in any of these matters could result in significant damages, additional penalties or other remedies imposed against us, and/or our current or former directors or officers, which could harm our reputation, business, financial condition, results of operations or cash flows. In addition, an unfavorable outcome in any of these matters could exceed coverage provided, if any, under potentially applicable insurance policies, which is limited. Following disclosure of the Fabricated Transactions, we have had difficulties in obtaining desirable insurance coverage, or any insurance coverage, regarding legal proceedings, investigations and inquiries, and we cannot assure you with any certainty that we will be able to obtain such coverage in the future. The Fabricated Transactions also led to material adverse impacts on our operations, our reputation and our relationships with business partners, as well as material adverse impacts on our financial position, including incurred costs and expenses and our ability to raise new capital in the future. Further, our senior management team is expected to continue to devote significant time and efforts to address the impacts associated with or arising from the Fabricated Transactions.
+
+We cannot predict all impacts on us in connection with or arising from the Fabricated Transactions. Any unknown or new risks may result in a material adverse effect on us.

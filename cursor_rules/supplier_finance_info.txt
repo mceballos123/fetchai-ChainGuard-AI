@@ -1,0 +1,39 @@
+For an american supplier(lets say we are using the american version of this)
+We want to go on  this url and we gfet thge CIK from the supplier we want to look into for more detail
+# This is how it would lookk like https://www.sec.gov/edgar/browse/?CIK=2068577&owner=exclude
+# For the one we want to select we can choose then choose a documjent to look at, we can simulate clicking on it use selium and the latest filling we want ot choose is 20-F for foreign comapnies
+But if the company is United STates  then click on thge 10-Q documents
+# For the one we want to select we can choose theh CIKL: 
+
+
+10Q Example:
+Item 2. Management's Discussion and Analysis of Financial Condition and Results of Operations
+The following discussion and analysis of our financial condition and results of operations should be read in conjunction with our unaudited interim condensed consolidated financial statements and the related notes included elsewhere in this Quarterly Report on Form 10-Q ("Form 10-Q"), and audited consolidated financial statements included in our final prospectus filed with the SEC on September 15, 2025 pursuant to Rule 424(b)(4) under the Securities Act of 1933, as amended (the “Prospectus”). In addition to historical information, this discussion and analysis contains forward-looking statements based on current expectations that involve risks, uncertainties, and other factors outside the Company’s control, as well as assumptions, such as our plans, objectives, expectations, and intentions. Our actual results may differ materially from those expressed or implied in the forward-looking statements as a result of various factors, including those described under the sections entitled “Forward-Looking Statements” above and “Risk Factors” elsewhere in this Form 10-Q, in the Prospectus and our other filings with the SEC.
+Overview
+We are a high-growth operator of guest-centric, drive-thru coffee bars offering premium caffeinated beverages and an elevated in-store experience crafted by our engaging baristas. Black Rock Coffee Bar was founded in 2008 in Beaverton, Oregon, by our co-founders Daniel Brand and Jeff Hernandez. What started as a single 160 square foot coffee bar in 2008 is now one of the fastest growing beverage companies in the United States by revenue and the largest fully company-owned coffee retailer in the country, with 169 locations spanning seven states as of September 30, 2025, from the Pacific Northwest to Texas.
+We were founded as a drive-thru only concept and evolved to include engaging seating areas, which we call “lobbies.” All of our locations include efficient drive-thrus and approximately 75% of our locations include lobbies as of September 30, 2025. We expect most of our new locations to include both drive-thrus and lobbies as we continue to grow. Our modern, inviting store formats—paired with a robust digital platform—allow us to deliver a dynamic and multi-faceted guest experience.
+Driven by a passion for Connection, Caffeine, and Community, Black Rock is a platform to do well by our baristas, guests, and the communities we serve. With a relentless focus on people and excellence, our culture has been key to our success.
+These results demonstrate the strength and consistency of our model and highlight our genuine connection to our guests across diverse markets.
+Initial Public Offering and Related Transactions
+Black Rock Coffee Bar, Inc. was originally incorporated as a Delaware corporation on May 2, 2025 and in June 2025 re-domiciled to be incorporated in Texas for the purposes of facilitating an initial public offering. On September 15, 2025, we completed our IPO in which we issued and sold 16,911,764 shares of Class A common stock (including 2,205,882 shares sold pursuant to the full exercise of the underwriters option to purchase additional shares) at an offering price of $20.00 per share, resulting in net proceeds of approximately $306.5 million after deducting underwriting discounts, commissions and offering expenses. Black Rock Coffee Bar, Inc. used the net proceeds from the IPO to: (i) purchase 3,857,642 newly issued LLC Units for approximately $71.8 million directly from Black Rock OpCo; and (ii) purchase 13,054,122 LLC Units from certain Continuing Equity Owners for approximately $242.8 million, each at a price per unit equal to the IPO price per share of Class A common stock less the underwriting discount.
+For additional information related to our IPO and the Transactions, see "The Transactions" in the forepart of this Form 10-Q, “—Liquidity and Capital Resources—IPO and Related Transactions” in this Part I, Item 2 as well as Note 1, Note 6 and Note 8 to the unaudited condensed consolidated financial statements elsewhere in this Form 10-Q.
+Growth Strategies and Outlook
+With 169 stores as of September 30, 2025, we believe we are well-positioned to take advantage of significant growth opportunities due to our clear and consistent focus on creating authentic connections between baristas and guests, delivered through premium caffeinated beverages in modern, welcoming environments. We plan to expand our business by executing on the following growth strategies:
+
+20-f example
+8.A.Consolidated Statements and Other Financial Information
+
+We have appended consolidated financial statements filed as part of this annual report.
+
+Legal Proceedings
+
+From time to time, we are subject to legal and administrative proceedings and claims arising in the ordinary course of our business relating to, among other things, lease and other commercial disputes, contract disputes, trademark and other intellectual property infringement claims, personal injury claims and employment-related claims, such as wage and hour and wrongful termination. Unless otherwise indicated, we cannot reasonably predict the outcome of these legal proceedings, nor can we estimate the amount of loss, or range of loss, if any, that may result from these proceedings. An adverse outcome in certain of these proceedings could have a material adverse effect on our business, financial condition and results of operations, and could cause the market value of our ADSs and/or other securities to decline.
+
+Governmental and Regulatory Inquiries
+
+SEC Investigation and Settlement
+
+We self-disclosed to the SEC the Fabricated Transactions referenced in our press release on April 2, 2020. Following our disclosure, the SEC initiated an investigation into the Fabricated Transactions. We cooperated with the SEC’s investigation.
+
+On December 16, 2020, the SEC announced its settlement with us regarding the Fabricated Transactions. Under the terms of the settlement, we, without admitting or denying the allegations of the SEC, consented to the entry of an order (i) requiring us to pay a civil money penalty in the amount of US$180 million to the SEC, eligible for offset by any cash payments made by us to our security holders pursuant to any schemes of arrangement approved by the Cayman Court in the provisional liquidation proceedings and restructuring, and (ii) permanently enjoining us from violations of certain federal securities laws, including Section 10(b) of the Securities Exchange Act of 1934.
+
