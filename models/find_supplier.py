@@ -62,5 +62,4 @@ class SupplierSearchState(TypedDict):
     success: bool
     error_message: Optional[str]
     search_summary: str
-    score: int
     ctx: Optional[Context]
