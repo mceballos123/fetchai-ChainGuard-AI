@@ -25,7 +25,6 @@ finance_info_agent = Agent(
     port=8008,
     mailbox=True,
 )
-
 finance_info_protocol = Protocol(name="finance_info_protocol", version="1.0")
 
 
