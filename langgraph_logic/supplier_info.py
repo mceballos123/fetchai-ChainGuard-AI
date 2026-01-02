@@ -215,53 +215,195 @@ def extract_company_info_node(state: SupplierInfoState) -> SupplierInfoState:
                     ctx.logger.info(f"Found main document: {main_doc_url}")
 
                 # Navigate to the main document
-                driver.get(main_doc_url)
-                time.sleep(3)
+                # iXBRL viewer doesn't work in headless mode - use raw HTML instead
+                actual_doc_url = main_doc_url
+                if "/ix?doc=" in main_doc_url:
+                    # Extract the raw document URL (bypass iXBRL viewer)
+                    actual_doc_url = "https://www.sec.gov" + main_doc_url.split("/ix?doc=")[1]
+                    if ctx:
+                        ctx.logger.info(f"📄 Using raw HTML (iXBRL viewer doesn't work in headless mode)")
+                        ctx.logger.info(f"📄 Raw document URL: {actual_doc_url}")
 
-                # Get the page text
+                driver.get(actual_doc_url)
+                time.sleep(5)
+
+                # Get page content
                 page_text = driver.find_element(By.TAG_NAME, "body").text
 
-                # Extract company information using keywords
+                if ctx:
+                    ctx.logger.info(f"📄 Page text length: {len(page_text)} chars")
+
+                    if len(page_text) > 0:
+                        ctx.logger.info(f"📄 First 500 chars: {page_text[:500]}")
+                    else:
+                        ctx.logger.warning(f"⚠ Page text is empty, will try HTML parsing")
+
+                # Extract company information from Item 4 section
+                # Focus on getting concise, relevant company description (~150 words)
                 company_description = ""
                 history = ""
 
-                # Look for "History and Development of the Company" section
-                history_patterns = [
-                    r"History and Development of the Company[:\.]?\s*(.{100,2000})",
-                    r"4\.A\.\s*History and Development[:\.]?\s*(.{100,2000})",
-                    r"Item 4\.?\s*Information on the Company[:\.]?\s*(.{100,2000})",
+                if ctx:
+                    ctx.logger.info(f"🔍 Looking specifically for 'Item 4. Information on the Company' section (NOT Key Information)...")
+
+                # Step 1: Skip Table of Contents completely
+                # The TOC appears early in the document with page numbers
+                # Actual content starts much later, after all the TOC entries
+
+                content_start = 0
+
+                # Find the SECOND occurrence of "PART I" (first is in TOC, second is actual content)
+                part_i_matches = list(re.finditer(r"PART\s+I\b", page_text, re.IGNORECASE))
+
+                if len(part_i_matches) >= 2:
+                    # Use the second "PART I" which is the actual content start
+                    content_start = part_i_matches[1].start()
+                    if ctx:
+                        ctx.logger.info(f"📍 Found actual content start (2nd PART I occurrence) at position {content_start}")
+
+                elif len(part_i_matches) == 1:
+                    # If only one PART I, look for first actual Item with substantial text after it
+                    # Pattern: "Item 1." followed by actual paragraph (not just page numbers)
+                    item1_pattern = r"Item\s+1\.\s+Identity of Directors[^\d]{100,}"
+                    match = re.search(item1_pattern, page_text, re.IGNORECASE)
+                    if match:
+                        content_start = match.start()
+                        if ctx:
+                            ctx.logger.info(f"📍 Found content start via Item 1 with content at position {content_start}")
+
+                if content_start == 0:
+                    # Fallback: Skip first 20% of document (usually TOC is in first portion)
+                    content_start = len(page_text) // 5
+                    if ctx:
+                        ctx.logger.warning(f"⚠ Using fallback: skipping first 20% of document")
+                        ctx.logger.info(f"📍 Content start at position {content_start}")
+
+                # Use content after TOC
+                main_content = page_text[content_start:] if content_start > 0 else page_text
+
+                if ctx:
+                    ctx.logger.info(f"📄 Main content length: {len(main_content)} chars")
+                    ctx.logger.info(f"📄 First 300 chars of main content: {main_content[:300]}...")
+
+                # Step 2: Find actual "Item 4. Information on the Company" section content
+                # NOT "Item 4A" - we want the intro paragraph before subsections
+
+                # Look for "Item 4." header followed by actual text paragraphs
+                # Actual content will have sentences, not just page numbers
+                item4_patterns = [
+                    # Pattern 1: Item 4 followed by text until Item 4.A or Item 4A
+                    r"Item\s+4\.\s+Information on the Company\s*\n+(.+?)(?=\s+(?:Item\s+4\.A|Item\s+4A|4\.A\.|ITEM\s+4A))",
+                    # Pattern 2: More flexible - until any subsection
+                    r"Item\s+4\.\s+Information on the Company\s*\n+(.+?)(?=\s+Item\s+\d+\.?[A-Z])",
+                    # Pattern 3: Get first paragraph after Item 4
+                    r"Item\s+4\.\s+Information on the Company\s*\n+([A-Z][^\n]+(?:\n[A-Z][^\n]+){1,3})",
                 ]
 
-                for pattern in history_patterns:
-                    match = re.search(pattern, page_text, re.IGNORECASE | re.DOTALL)
+                if ctx:
+                    ctx.logger.info(f"  Trying {len(item4_patterns)} patterns to find Item 4 actual content...")
+
+                for i, pattern in enumerate(item4_patterns):
+                    match = re.search(pattern, main_content, re.IGNORECASE | re.DOTALL)
                     if match:
-                        history = match.group(1).strip()[:1000]  # Limit to 1000 chars
+                        company_description = match.group(1).strip()
+
+                        if ctx:
+                            ctx.logger.info(f"📝 Pattern {i+1} matched! Checking if valid...")
+                            ctx.logger.info(f"  First 200 chars: {company_description[:200]}...")
+
+                        # Strong validation: reject if it looks like TOC
+                        # TOC has: numbers followed by "Item"
+                        if re.search(r'^\d+\s*$', company_description, re.MULTILINE):
+                            if ctx:
+                                ctx.logger.warning(f"⚠ Contains standalone numbers (TOC pattern), skipping...")
+                            continue
+
+                        if re.search(r'\d+\s+Item\s+\d+', company_description[:300]):
+                            if ctx:
+                                ctx.logger.warning(f"⚠ Contains 'number Item number' (TOC pattern), skipping...")
+                            continue
+
+                        # Must have actual text (words), not just numbers and item references
+                        word_count = len(re.findall(r'\b[A-Za-z]{3,}\b', company_description[:500]))
+                        if word_count < 20:
+                            if ctx:
+                                ctx.logger.warning(f"⚠ Too few words ({word_count}), likely not actual content...")
+                            continue
+
+                        if ctx:
+                            ctx.logger.info(f"✓ VALID content found with pattern {i+1}!")
+
+                        # Clean up: remove excessive whitespace
+                        company_description = re.sub(r'\s+', ' ', company_description)
+                        # Limit to approximately 150 words
+                        words = company_description.split()
+                        company_description = ' '.join(words[:150])
+
+                        if ctx:
+                            ctx.logger.info(f"  Final: {len(company_description)} chars (~{len(words[:150])} words)")
+                            ctx.logger.info(f"  Preview: {company_description[:200]}...")
                         break
+                else:
+                    if ctx:
+                        ctx.logger.warning(f"⚠ Could not find Item 4 actual content after trying all patterns")
 
-                # Look for business description
-                business_patterns = [
-                    r"(?:Business|Our Business|The Business)[:\.]?\s*(.{100,1500})",
-                    r"Item 1\.?\s*Business[:\.]?\s*(.{100,1500})",
-                    r"Description of Business[:\.]?\s*(.{100,1500})",
-                ]
+                # Step 2: If Item 4 not found, look for "4.A. History and Development"
+                if not company_description:
+                    if ctx:
+                        ctx.logger.info(f"🔍 Item 4 intro not found, looking for 4.A History section...")
 
-                for pattern in business_patterns:
-                    match = re.search(pattern, page_text, re.IGNORECASE | re.DOTALL)
-                    if match:
-                        company_description = match.group(1).strip()[:1000]
-                        break
+                    history_patterns = [
+                        r"4\.A\.\s*History and Development of the Company\s+(In [A-Z][^\.]+\.[^\n]{200,1000})",
+                        r"History and Development of the Company[:\.]?\s+(In [A-Z][^\.]+\.[^\n]{200,1000})",
+                    ]
 
-                # If we didn't find specific sections, use the history as description
-                if not company_description and history:
-                    company_description = history
-                elif not company_description:
-                    # Fallback: get first few paragraphs
-                    company_description = page_text[:1000]
+                    for i, pattern in enumerate(history_patterns):
+                        match = re.search(pattern, main_content, re.IGNORECASE | re.DOTALL)
+                        if match:
+                            history = match.group(1).strip()
+                            history = re.sub(r'\s+', ' ', history)
+                            words = history.split()
+                            history = ' '.join(words[:150])
+
+                            if ctx:
+                                ctx.logger.info(f"✓ Found History section with pattern {i+1}")
+                                ctx.logger.info(f"  Length: {len(history)} chars (~{len(words[:150])} words)")
+
+                            # Use history as description
+                            company_description = history
+                            break
+
+                # Step 3: Fallback - look for company name mentions
+                if not company_description:
+                    if ctx:
+                        ctx.logger.info(f"📝 Using fallback - searching for company description...")
+
+                    # Look for sentences that describe what the company does
+                    company_name = state.get("company_name", "")
+                    if company_name:
+                        # Search for the company name followed by description
+                        fallback_pattern = rf"{re.escape(company_name)}[^\n]{{0,50}}(?:is|operates|provides|engages|specializes)([^\n]{{200,800}})"
+                        match = re.search(fallback_pattern, main_content, re.IGNORECASE)
+                        if match:
+                            company_description = f"{company_name} {match.group(0)}"
+                            company_description = re.sub(r'\s+', ' ', company_description)
+                            words = company_description.split()
+                            company_description = ' '.join(words[:150])
+
+                            if ctx:
+                                ctx.logger.info(f"✓ Found company description via fallback")
+                                ctx.logger.info(f"  Length: {len(company_description)} chars (~{len(words[:150])} words)")
 
                 driver.quit()
 
                 if ctx:
-                    ctx.logger.info(f"✓ Extracted company information (description: {len(company_description)} chars)")
+                    ctx.logger.info(f"✓ Extracted company information:")
+                    ctx.logger.info(f"  - Description: {len(company_description)} chars")
+                    ctx.logger.info(f"  - History: {len(history)} chars")
+                    if company_description:
+                        ctx.logger.info(f"  - Description preview: {company_description[:200]}...")
+                    else:
+                        ctx.logger.error(f"  - ❌ DESCRIPTION IS EMPTY!")
 
                 return {
                     **state,
@@ -329,12 +471,24 @@ def error_node(state: SupplierInfoState) -> SupplierInfoState:
     """
     ctx = state.get("ctx")
 
+    error_msg = state.get('error_message', 'Unknown error')
+
     if ctx:
-        ctx.logger.error(f"[LangGraph Node: error] {state.get('error_message', 'Unknown error')}")
+        ctx.logger.error(f"[LangGraph Node: error] Entering error handler")
+        ctx.logger.error(f"  - Error message: {error_msg}")
+        ctx.logger.error(f"  - Company: {state.get('company_name')}")
+        ctx.logger.error(f"  - Has description: {bool(state.get('company_description'))}")
+        ctx.logger.error(f"  - Has history: {bool(state.get('history'))}")
+
+        # If we got here without an error message but also without data, set a default error
+        if not error_msg and not state.get('company_description') and not state.get('history'):
+            error_msg = "Failed to extract company description or history from SEC filing"
+            ctx.logger.error(f"  - Setting default error message: {error_msg}")
 
     return {
         **state,
-        "success": False
+        "success": False,
+        "error_message": error_msg
     }
 
 
@@ -364,12 +518,27 @@ def should_continue_after_finding_filing(state: SupplierInfoState) -> Literal["e
 
 def should_continue_to_format(state: SupplierInfoState) -> Literal["format_results", "error"]:
     """Route after extracting company info"""
+    ctx = state.get("ctx")
+
+    if ctx:
+        ctx.logger.info(f"🔀 Routing decision after extraction:")
+        ctx.logger.info(f"  - error_message: {state.get('error_message')}")
+        ctx.logger.info(f"  - score: {state.get('score', 0)}")
+        ctx.logger.info(f"  - has company_description: {bool(state.get('company_description'))}")
+        ctx.logger.info(f"  - has history: {bool(state.get('history'))}")
+
     if state.get("error_message") or state.get("score", 0) < 75:
+        if ctx:
+            ctx.logger.warning(f"❌ Routing to ERROR (error_message or low score)")
         return "error"
 
     if state.get("company_description") or state.get("history"):
+        if ctx:
+            ctx.logger.info(f"✓ Routing to FORMAT_RESULTS")
         return "format_results"
 
+    if ctx:
+        ctx.logger.warning(f"❌ Routing to ERROR (no description or history)")
     return "error"
 
 

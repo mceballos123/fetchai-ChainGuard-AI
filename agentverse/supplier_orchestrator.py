@@ -413,10 +413,10 @@ supplier_orchestrator = Agent(
 chat_proto = Protocol(name="chat_protocol", spec=chat_protocol_spec)
 
 # Agent Addresses
-FIND_SUPPLIER_AGENT_ADDRESS = os.getenv("FIND_SUPPLIER_ADDRESS")
-SUPPLIER_INFO_AGENT_ADDRESS = os.getenv("SUPPLIER_INFO_ADDRESS")
-FINANCE_INFO_AGENT_ADDRESS = os.getenv("FINANCE_INFO_ADDRESS")
-RISK_MANAGEMENT_AGENT_ADDRESS = os.getenv("RISK_MANAGEMENT_ADDRESS")
+FIND_SUPPLIER_AGENT_ADDRESS = os.getenv("FIND_SUPPLIER_AGENT_ADDRESS")
+SUPPLIER_INFO_AGENT_ADDRESS = os.getenv("SUPPLIER_INFO_AGENT_ADDRESS")
+FINANCE_INFO_AGENT_ADDRESS = os.getenv("FINANCE_INFO_AGENT_ADDRESS")
+RISK_MANAGEMENT_AGENT_ADDRESS = os.getenv("RISK_MANAGEMENT_AGENT_ADDRESS")
 
 orchestrator_protocol = Protocol(name="supplier_orchestrator_protocol", version="1.0")
 
