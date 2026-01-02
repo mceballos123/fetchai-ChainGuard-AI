@@ -167,9 +167,7 @@ async def handle_supplier_info_request(
 
         else:
             # Handle errors
-            error_msg = final_state.get(
-                "error_message", "Failed to extract company information"
-            )
+            error_msg = final_state.get("error_message") or "Failed to extract company information"
             ctx.logger.warning(f"❌ Failed to extract company info: {error_msg}")
 
             error_response = SupplierInfoResponse(

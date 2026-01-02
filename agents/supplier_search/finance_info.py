@@ -166,9 +166,7 @@ async def handle_finance_info_request(
 
         else:
             # Handle errors
-            error_msg = final_state.get(
-                "error_message", "Failed to extract financial information"
-            )
+            error_msg = final_state.get("error_message") or "Failed to extract financial information"
             ctx.logger.warning(f"❌ Failed to extract financial info: {error_msg}")
 
             error_response = FinanceInfoResponse(

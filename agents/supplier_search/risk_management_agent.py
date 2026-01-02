@@ -175,9 +175,7 @@ async def handle_risk_info_request(
 
         else:
             # Handle errors
-            error_msg = final_state.get(
-                "error_message", "Failed to extract risk information"
-            )
+            error_msg = final_state.get("error_message") or "Failed to extract risk information"
             ctx.logger.warning(f"❌ Failed to extract risk info: {error_msg}")
 
             error_response = RiskInfoResponse(
